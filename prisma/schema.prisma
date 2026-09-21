@@ -1,0 +1,119 @@
+// Схема анализатора YouTube-каналов.
+//
+// Главное решение: метрики — ряд наблюдений, а не текущее значение.
+// Неизменное у видео (тип, длительность, дата публикации, описание) лежит
+// в Video; изменчивое (просмотры, лайки, комментарии, вирусность) — в VideoStat,
+// по строке на каждую выгрузку. Каждая выгрузка заводит FetchRun и свой набор
+// VideoStat, прежние не затираются: на этом стоит сравнение двух дат.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+/// Канал. Первичный ключ — идентификатор YouTube вида `UC…`: он неизменен,
+/// в отличие от названия и `@handle`, поэтому сопоставление идёт по нему.
+model Channel {
+  id                String   @id
+  title             String
+  handle            String?
+  thumbnailUrl      String?
+  /// Плейлист загрузок `UU…`: через него идёт перебор видео вместо search.list.
+  uploadsPlaylistId String
+  lastFetchedAt     DateTime?
+  createdAt         DateTime @default(now())
+
+  videos    Video[]
+  fetchRuns FetchRun[]
+}
+
+/// Видео. Только то, что не меняется от выгрузки к выгрузке.
+model Video {
+  id          String   @id
+  channelId   String
+  kind        VideoKind
+  /// true, когда тип определён только по длительности: подтверждение через
+  /// youtube.com/shorts/<id> было недоступно. Такие строки помечаются в таблице.
+  kindAssumed Boolean  @default(false)
+  /// Длительность в секундах. API отдаёт ISO 8601, разбор — отдельная функция.
+  durationSec Int
+  publishedAt DateTime
+  title       String
+  description String   @default("")
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime
+  /// Проставляется, когда видео пропало с канала: строка не удаляется молча.
+  goneAt      DateTime?
+
+  channel Channel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  stats   VideoStat[]
+
+  @@index([channelId])
+  @@index([channelId, kind])
+}
+
+/// Одна выгрузка канала: и журнал выполнения, и точка отсчёта для снимка метрик.
+model FetchRun {
+  id         String      @id @default(cuid())
+  channelId  String
+  status     FetchStatus @default(RUNNING)
+  startedAt  DateTime    @default(now())
+  finishedAt DateTime?
+
+  /// Параметры запроса, с которыми выгрузку запустили.
+  /// requestedLimit = null означает «все видео».
+  requestedLimit Int?
+  includeVideos  Boolean @default(true)
+  includeShorts  Boolean @default(true)
+
+  /// Прогресс: сколько видео обработано и сколько ожидается (может быть неизвестно).
+  processedCount Int  @default(0)
+  expectedCount  Int?
+
+  /// Путь к снимку .xlsx в history/. Побочный продукт: сервис работает и без него.
+  snapshotPath String?
+  /// Причина остановки для PARTIAL и FAILED — например, исчерпанная квота.
+  errorReason  String?
+
+  channel Channel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  stats   VideoStat[]
+
+  @@index([channelId, startedAt])
+}
+
+/// Снимок метрик одного видео в одной выгрузке.
+/// null в счётчике означает «статистика скрыта автором», а не ноль.
+model VideoStat {
+  id           String @id @default(cuid())
+  videoId      String
+  fetchRunId   String
+  viewCount    Int?
+  likeCount    Int?
+  commentCount Int?
+  /// Считается один раз по завершении выгрузки, по медианам своего типа.
+  viralityScore Float?
+
+  video    Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  fetchRun FetchRun @relation(fields: [fetchRunId], references: [id], onDelete: Cascade)
+
+  @@unique([videoId, fetchRunId])
+  @@index([fetchRunId])
+}
+
+enum VideoKind {
+  VIDEO
+  SHORTS
+}
+
+enum FetchStatus {
+  RUNNING
+  SUCCEEDED
+  /// Выгрузка оборвалась, но собранные строки сохранены — например, кончилась квота.
+  PARTIAL
+  FAILED
+}
