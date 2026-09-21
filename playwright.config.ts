@@ -36,6 +36,9 @@ export default defineConfig({
       timeout: 120_000,
       env: {
         YOUTUBE_API_BASE: `http://127.0.0.1:${mockPort}`,
+        // Проверка типа Shorts тоже идёт в заглушку: ни один тест
+        // не должен ходить на настоящий youtube.com.
+        YOUTUBE_WEB_BASE: `http://127.0.0.1:${mockPort}`,
         YOUTUBE_API_KEY: "e2e-ключ-не-настоящий",
         DATABASE_URL: "file:./db/e2e.db",
       },

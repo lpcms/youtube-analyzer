@@ -7,6 +7,7 @@
 
 import { callYouTube } from "./api";
 import { SHORTS_MAX_SECONDS, parseIsoDuration } from "./duration";
+import { confirmShorts, type ConfirmOptions } from "./shorts-check";
 
 /** Максимум, который YouTube отдаёт за один вызов. */
 export const PAGE_SIZE = 50;
@@ -17,9 +18,11 @@ export interface FetchedVideo {
   readonly description: string;
   readonly publishedAt: Date;
   readonly durationSec: number;
-  /** Тип по длительности. Подтверждение через страницу Shorts добавит T-05. */
   readonly kind: "VIDEO" | "SHORTS";
-  /** Пока тип определён только по длительности — это предположение. */
+  /**
+   * true, когда тип выведен только из длительности: подтверждение через
+   * страницу Shorts не удалось. Такие строки помечаются в таблице.
+   */
   readonly kindAssumed: boolean;
   /** null означает «статистика скрыта автором», а не ноль. */
   readonly viewCount: number | null;
@@ -50,6 +53,44 @@ function counter(raw: string | undefined): number | null {
   if (raw === undefined) return null;
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Кандидат в Shorts — по длительности. Порог включительный: ролик ровно
+ * на 180 секунд ещё может быть Shorts.
+ *
+ * Обратное неверно: короткое обычное видео тоже укладывается в порог,
+ * поэтому кандидат требует подтверждения.
+ */
+export function isShortsCandidate(durationSec: number): boolean {
+  return durationSec <= SHORTS_MAX_SECONDS;
+}
+
+/**
+ * Подтверждает тип кандидатов запросом к странице Shorts.
+ *
+ * Длинные видео не проверяются вовсе — лишние запросы ни к чему.
+ * Неудавшаяся проверка оставляет тип предположительным, но выгрузку не роняет.
+ */
+export async function resolveKinds(
+  videos: readonly FetchedVideo[],
+  options: ConfirmOptions = {},
+): Promise<readonly FetchedVideo[]> {
+  const candidates = videos.filter((v) => isShortsCandidate(v.durationSec)).map((v) => v.id);
+  if (candidates.length === 0) return videos;
+
+  const verdicts = await confirmShorts(candidates, options);
+
+  return videos.map((video) => {
+    if (!isShortsCandidate(video.durationSec)) return video;
+
+    const verdict = verdicts.get(video.id);
+    if (verdict === undefined || verdict === "UNKNOWN") {
+      // Остаётся предположение по длительности.
+      return video;
+    }
+    return { ...video, kind: verdict, kindAssumed: false };
+  });
 }
 
 /** Идентификаторы видео из плейлиста загрузок, не больше `limit`. */
@@ -116,8 +157,9 @@ export async function fetchVideoDetails(
         description: item.snippet?.description ?? "",
         publishedAt: new Date(published),
         durationSec,
-        kind: durationSec <= SHORTS_MAX_SECONDS ? "SHORTS" : "VIDEO",
-        kindAssumed: durationSec <= SHORTS_MAX_SECONDS,
+        // Пока только по длительности — подтверждение ниже, в resolveKinds.
+        kind: isShortsCandidate(durationSec) ? "SHORTS" : "VIDEO",
+        kindAssumed: isShortsCandidate(durationSec),
         viewCount: counter(item.statistics?.viewCount),
         likeCount: counter(item.statistics?.likeCount),
         commentCount: counter(item.statistics?.commentCount),
@@ -132,8 +174,10 @@ export async function fetchVideoDetails(
 export async function fetchChannelVideos(
   uploadsPlaylistId: string,
   limit: number,
+  options: ConfirmOptions = {},
 ): Promise<readonly FetchedVideo[]> {
   const ids = await fetchUploadIds(uploadsPlaylistId, limit);
   if (ids.length === 0) return [];
-  return fetchVideoDetails(ids);
+  const videos = await fetchVideoDetails(ids);
+  return resolveKinds(videos, options);
 }
