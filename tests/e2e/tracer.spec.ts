@@ -32,13 +32,25 @@ test.describe("выгрузка канала", () => {
     expect(links).toHaveLength(TOTAL);
     expect(new Set(links).size).toBe(TOTAL);
 
-    await expect(page.getByRole("columnheader", { name: "URL" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Тип" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Просмотры" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Дата" })).toBeVisible();
+    // Все девять колонок из ТЗ, в заданном порядке.
+    const headers = await page.getByRole("columnheader").allInnerTexts();
+    expect(headers.map((h) => h.trim())).toEqual([
+      "URL",
+      "Тип",
+      "Длительность",
+      "Просмотры",
+      "Лайки",
+      "Комментарии",
+      "Вирусность",
+      "Дата",
+      "Описание",
+    ]);
 
-    // Дата в формате из ТЗ.
-    await expect(rows.first().locator("td").nth(3)).toHaveText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    // Дата в формате из ТЗ: колонка восьмая, а ссылка — заголовок строки,
+    // поэтому среди td она седьмая.
+    await expect(rows.first().locator("td").nth(6)).toHaveText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    // Длительность в формате из ТЗ.
+    await expect(rows.first().locator("td").nth(1)).toHaveText(/^\d+:\d{2}(:\d{2})?$/);
   });
 
   test("в таблице есть строки обоих типов, и тип подтверждён", async ({ page }) => {
@@ -113,6 +125,43 @@ test.describe("выгрузка канала", () => {
     await expect(page.locator("#types-error")).toHaveText(
       "Выберите хотя бы один тип: Video или Shorts",
     );
+  });
+
+  test("скрытая статистика выводится как «н/д», ноль остаётся нулём", async ({ page }) => {
+    await fetchChannel(page);
+
+    // У каждого третьего видео в заглушке лайков нет вовсе.
+    const likes = await page.locator("tbody tr td:nth-child(5)").allInnerTexts();
+    expect(likes.filter((t) => t.trim() === "н/д").length).toBeGreaterThan(0);
+
+    // А у первого видео ноль комментариев — это настоящий ноль.
+    const comments = await page.locator("tbody tr td:nth-child(6)").allInnerTexts();
+    expect(comments.some((t) => t.trim() === "0")).toBe(true);
+  });
+
+  test("разметка в описании остаётся текстом и не исполняется", async ({ page }) => {
+    await fetchChannel(page);
+
+    const table = page.locator("table");
+    // Тег виден как текст.
+    await expect(table.getByText("<b>жирный</b>", { exact: false }).first()).toBeVisible();
+    // И не превратился в элементы.
+    await expect(table.locator("b")).toHaveCount(0);
+    await expect(table.locator("img")).toHaveCount(0);
+  });
+
+  test("длинное описание сокращается, полный текст раскрывается", async ({ page }) => {
+    await fetchChannel(page);
+
+    const details = page.locator("tbody details").first();
+    await expect(details).toBeVisible();
+
+    const collapsed = (await details.innerText()).trim();
+    expect(collapsed.endsWith("…")).toBe(true);
+
+    await details.locator("summary").click();
+    const expanded = (await details.innerText()).trim();
+    expect(expanded.length).toBeGreaterThan(collapsed.length);
   });
 
   test("адрес не с youtube.com отклоняется с сообщением", async ({ page }) => {

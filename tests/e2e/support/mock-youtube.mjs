@@ -58,6 +58,17 @@ function playlistItems(params) {
   };
 }
 
+/**
+ * Описания разной длины: пустое, короткое и длинное с разметкой внутри.
+ * Разметка обязана остаться видимым текстом, а не превратиться в элементы.
+ */
+function describe(i) {
+  if (i % 4 === 0) return "";
+  if (i % 4 === 1) return "Короткое описание";
+  if (i % 4 === 2) return '<b>жирный</b> и <img src=x onerror="alert(1)">';
+  return "Начало длинного описания. " + "текст ".repeat(40);
+}
+
 function videos(requested) {
   return {
     items: requested.map((id) => {
@@ -66,14 +77,16 @@ function videos(requested) {
         id,
         snippet: {
           title: `Видео ${i}`,
-          description: "",
+          description: describe(i),
           publishedAt: new Date(Date.UTC(2026, 0, 1 + i, 12, 0)).toISOString(),
         },
         contentDetails: { duration: isShort(i) ? "PT45S" : "PT10M" },
         statistics: {
           viewCount: String(1000 * (i + 1)),
-          likeCount: "10",
-          commentCount: "1",
+          // У каждого третьего лайки скрыты — поля просто нет, и это null,
+          // а не ноль. В таблице должно получиться «н/д».
+          ...(i % 3 === 0 ? {} : { likeCount: "10" }),
+          commentCount: i === 0 ? "0" : "1",
         },
       };
     }),

@@ -160,11 +160,18 @@ export async function fetchChannel(
 
 export interface VideoRow {
   readonly id: string;
+  readonly title: string;
   readonly kind: "VIDEO" | "SHORTS";
   /** Тип выведен только из длительности — подтвердить не удалось. */
   readonly kindAssumed: boolean;
+  readonly durationSec: number;
   readonly publishedAt: Date;
+  readonly description: string;
+  /** null в счётчике означает «статистика скрыта автором», а не ноль. */
   readonly viewCount: number | null;
+  readonly likeCount: number | null;
+  readonly commentCount: number | null;
+  readonly viralityScore: number | null;
 }
 
 /** Строки таблицы для выгрузки: метрики берутся из её собственного снимка. */
@@ -182,10 +189,16 @@ export async function videoRows(
 
   return stats.map((stat) => ({
     id: stat.videoId,
+    title: stat.video.title,
     kind: stat.video.kind,
     kindAssumed: stat.video.kindAssumed,
+    durationSec: stat.video.durationSec,
     publishedAt: stat.video.publishedAt,
+    description: stat.video.description,
     viewCount: stat.viewCount,
+    likeCount: stat.likeCount,
+    commentCount: stat.commentCount,
+    viralityScore: stat.viralityScore,
   }));
 }
 
