@@ -11,11 +11,15 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
 import { YouTubeApiError } from "@/lib/youtube/api";
 import { resolveChannel } from "@/lib/youtube/resolve-channel";
-import { fetchChannelVideos } from "@/lib/youtube/videos";
+import { fetchChannelVideos, type FetchLimit } from "@/lib/youtube/videos";
 import type { ConfirmOptions } from "@/lib/youtube/shorts-check";
 
-/** Сколько видео берёт трассирующая пуля. */
-export const TRACER_LIMIT = 10;
+/**
+ * Сколько видео выгружать по умолчанию. `null` — весь канал: постраничный
+ * обход работает, и ограничивать выгрузку без просьбы пользователя незачем.
+ * Поле количества в форме добавит T-07.
+ */
+export const DEFAULT_LIMIT: FetchLimit = null;
 
 export type FetchChannelResult =
   | { readonly ok: true; readonly channelId: string; readonly fetchRunId: string }
@@ -34,9 +38,10 @@ export type FetchChannelError =
  */
 export async function fetchChannel(
   rawUrl: string,
-  options: { limit?: number; prisma?: PrismaClient; shorts?: ConfirmOptions } = {},
+  options: { limit?: FetchLimit; prisma?: PrismaClient; shorts?: ConfirmOptions } = {},
 ): Promise<FetchChannelResult> {
-  const limit = options.limit ?? TRACER_LIMIT;
+  // undefined означает «не указано» и даёт умолчание; null — осознанное «все».
+  const limit = options.limit === undefined ? DEFAULT_LIMIT : options.limit;
   const db = options.prisma ?? defaultPrisma;
 
   const resolved = await resolveChannel(rawUrl);
@@ -92,6 +97,8 @@ export async function fetchChannel(
     },
   });
 
+  // Видео пишутся поштучно: upsert одним запросом на все строки не выражается,
+  // а семантика «есть — обнови, нет — заведи» здесь обязательна.
   for (const video of videos) {
     await db.video.upsert({
       where: { id: video.id },
@@ -119,16 +126,19 @@ export async function fetchChannel(
         lastSeenAt: now,
       },
     });
+  }
 
-    // Метрики — снимок этой выгрузки, прежние не трогаем.
-    await db.videoStat.create({
-      data: {
+  // Метрики — снимок этой выгрузки, прежние не трогаем. Строки заведомо новые
+  // (выгрузка только что создана), поэтому одна вставка вместо сотен.
+  if (videos.length > 0) {
+    await db.videoStat.createMany({
+      data: videos.map((video) => ({
         videoId: video.id,
         fetchRunId: run.id,
         viewCount: video.viewCount,
         likeCount: video.likeCount,
         commentCount: video.commentCount,
-      },
+      })),
     });
   }
 

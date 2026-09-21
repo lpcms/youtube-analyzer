@@ -1,20 +1,28 @@
 /**
- * Заглушка YouTube Data API для E2E.
+ * Заглушка YouTube для E2E.
  *
  * Поднимается рядом с дев-сервером Next, который на время прогона смотрит
- * на неё через YOUTUBE_API_BASE. Нужна потому, что запрос к API уходит
- * с сервера, а не из браузера — page.route его не видит.
+ * на неё через YOUTUBE_API_BASE и YOUTUBE_WEB_BASE. Нужна потому, что
+ * запросы уходят с сервера, а не из браузера — page.route их не видит.
+ *
+ * Отдаёт 137 видео тремя страницами (50 + 50 + 37): канал заведомо больше
+ * одной страницы, иначе постраничный обход не проверялся бы вовсе.
  */
 import { createServer } from "node:http";
 
 const PORT = Number(process.env.MOCK_YOUTUBE_PORT ?? 3101);
 const CHANNEL_ID = "UCX6OQ3DkcsbYNE6H8uQQuVA";
 const UPLOADS = "UUX6OQ3DkcsbYNE6H8uQQuVA";
-const COUNT = 10;
+const PAGE_SIZE = 50;
 
-const videoIds = Array.from({ length: COUNT }, (_, i) =>
-  `e2evid${String(i).padStart(5, "0")}`.slice(0, 11),
+export const TOTAL = 137;
+
+const videoIds = Array.from({ length: TOTAL }, (_, i) =>
+  `v${String(i).padStart(10, "0")}`.slice(0, 11),
 );
+
+/** Нечётные — короткие и настоящие Shorts, чётные — длинные видео. */
+const isShort = (i) => i % 2 === 1;
 
 function channels() {
   return {
@@ -28,8 +36,16 @@ function channels() {
   };
 }
 
-function playlistItems() {
-  return { items: videoIds.map((id) => ({ contentDetails: { videoId: id } })) };
+function playlistItems(params) {
+  const maxResults = Number(params.get("maxResults") ?? PAGE_SIZE);
+  const offset = Number(params.get("pageToken") ?? "0");
+  const slice = videoIds.slice(offset, offset + maxResults);
+  const next = offset + slice.length;
+
+  return {
+    items: slice.map((id) => ({ contentDetails: { videoId: id } })),
+    ...(next < videoIds.length ? { nextPageToken: String(next) } : {}),
+  };
 }
 
 function videos(requested) {
@@ -41,10 +57,14 @@ function videos(requested) {
         snippet: {
           title: `Видео ${i}`,
           description: "",
-          publishedAt: new Date(Date.UTC(2026, 8, 21 - i, 12, 0)).toISOString(),
+          publishedAt: new Date(Date.UTC(2026, 0, 1 + i, 12, 0)).toISOString(),
         },
-        contentDetails: { duration: i % 2 === 0 ? "PT10M" : "PT45S" },
-        statistics: { viewCount: String(1000 * (i + 1)), likeCount: "10", commentCount: "1" },
+        contentDetails: { duration: isShort(i) ? "PT45S" : "PT10M" },
+        statistics: {
+          viewCount: String(1000 * (i + 1)),
+          likeCount: "10",
+          commentCount: "1",
+        },
       };
     }),
   };
@@ -53,12 +73,12 @@ function videos(requested) {
 const server = createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
 
-  // Страница Shorts: чётные видео заглушки длинные, нечётные — Shorts.
-  // Настоящий Short отвечает 200, обычное видео уходит редиректом на /watch.
+  // Страница Shorts: настоящий Short отвечает 200, обычное видео —
+  // редиректом на /watch.
   if (url.pathname.startsWith("/shorts/")) {
     const id = url.pathname.slice("/shorts/".length);
     const i = videoIds.indexOf(id);
-    if (i >= 0 && i % 2 === 1) {
+    if (i >= 0 && isShort(i)) {
       res.writeHead(200, { "content-type": "text/html" }).end("<html>short</html>");
     } else {
       res.writeHead(303, { location: `https://www.youtube.com/watch?v=${id}` }).end();
@@ -69,7 +89,7 @@ const server = createServer((req, res) => {
   let body;
 
   if (url.pathname.endsWith("/channels")) body = channels();
-  else if (url.pathname.endsWith("/playlistItems")) body = playlistItems();
+  else if (url.pathname.endsWith("/playlistItems")) body = playlistItems(url.searchParams);
   else if (url.pathname.endsWith("/videos"))
     body = videos((url.searchParams.get("id") ?? "").split(","));
   else {
@@ -82,5 +102,5 @@ const server = createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[mock-youtube] слушает http://127.0.0.1:${PORT}`);
+  console.log(`[mock-youtube] слушает http://127.0.0.1:${PORT}, видео: ${TOTAL}`);
 });
