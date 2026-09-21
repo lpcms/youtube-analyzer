@@ -24,6 +24,10 @@ db/*
 *.sqlite3
 prisma/dev.db*
 
+# Архив снимков выгрузок — данные пользователя, не код
+history/*
+!history/.gitkeep
+
 # Сгенерированный клиент Prisma
 src/generated/
 
