@@ -16,13 +16,27 @@ test.describe("трассирующая пуля", () => {
     const rows = page.locator("tbody tr");
     await expect(rows).toHaveCount(10);
 
-    // Колонки трассирующей пули.
+    // Колонки.
     await expect(page.getByRole("columnheader", { name: "URL" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Тип" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Просмотры" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Дата" })).toBeVisible();
 
     // Дата в формате из ТЗ.
-    await expect(rows.first().locator("td").nth(2)).toHaveText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    await expect(rows.first().locator("td").nth(3)).toHaveText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  });
+
+  test("в таблице есть строки обоих типов, и тип подтверждён", async ({ page }) => {
+    await page.goto("/");
+    await page.getByLabel("Адрес канала").fill("https://www.youtube.com/@e2e");
+    await page.getByRole("button", { name: "Начать" }).click();
+    await expect(page.locator("tbody tr")).toHaveCount(10);
+
+    const kinds = await page.locator("tbody tr td:nth-child(2)").allInnerTexts();
+    expect(kinds.filter((k) => k.trim() === "Video").length).toBeGreaterThan(0);
+    expect(kinds.filter((k) => k.trim() === "Shorts").length).toBeGreaterThan(0);
+    // Знак вопроса означал бы, что подтвердить тип не удалось.
+    expect(kinds.some((k) => k.includes("?"))).toBe(false);
   });
 
   test("ссылка на видео открывается в новой вкладке", async ({ page, context }) => {

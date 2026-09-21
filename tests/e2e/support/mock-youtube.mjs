@@ -52,6 +52,20 @@ function videos(requested) {
 
 const server = createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
+
+  // Страница Shorts: чётные видео заглушки длинные, нечётные — Shorts.
+  // Настоящий Short отвечает 200, обычное видео уходит редиректом на /watch.
+  if (url.pathname.startsWith("/shorts/")) {
+    const id = url.pathname.slice("/shorts/".length);
+    const i = videoIds.indexOf(id);
+    if (i >= 0 && i % 2 === 1) {
+      res.writeHead(200, { "content-type": "text/html" }).end("<html>short</html>");
+    } else {
+      res.writeHead(303, { location: `https://www.youtube.com/watch?v=${id}` }).end();
+    }
+    return;
+  }
+
   let body;
 
   if (url.pathname.endsWith("/channels")) body = channels();

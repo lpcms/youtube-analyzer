@@ -12,6 +12,7 @@ import { prisma as defaultPrisma } from "@/lib/prisma";
 import { YouTubeApiError } from "@/lib/youtube/api";
 import { resolveChannel } from "@/lib/youtube/resolve-channel";
 import { fetchChannelVideos } from "@/lib/youtube/videos";
+import type { ConfirmOptions } from "@/lib/youtube/shorts-check";
 
 /** Сколько видео берёт трассирующая пуля. */
 export const TRACER_LIMIT = 10;
@@ -33,7 +34,7 @@ export type FetchChannelError =
  */
 export async function fetchChannel(
   rawUrl: string,
-  options: { limit?: number; prisma?: PrismaClient } = {},
+  options: { limit?: number; prisma?: PrismaClient; shorts?: ConfirmOptions } = {},
 ): Promise<FetchChannelResult> {
   const limit = options.limit ?? TRACER_LIMIT;
   const db = options.prisma ?? defaultPrisma;
@@ -49,7 +50,7 @@ export async function fetchChannel(
 
   let videos;
   try {
-    videos = await fetchChannelVideos(channel.uploadsPlaylistId, limit);
+    videos = await fetchChannelVideos(channel.uploadsPlaylistId, limit, options.shorts ?? {});
   } catch (e) {
     if (e instanceof YouTubeApiError) {
       return { ok: false, error: { kind: "api", reason: e.kind, message: e.message } };
@@ -136,6 +137,9 @@ export async function fetchChannel(
 
 export interface VideoRow {
   readonly id: string;
+  readonly kind: "VIDEO" | "SHORTS";
+  /** Тип выведен только из длительности — подтвердить не удалось. */
+  readonly kindAssumed: boolean;
   readonly publishedAt: Date;
   readonly viewCount: number | null;
 }
@@ -155,6 +159,8 @@ export async function videoRows(
 
   return stats.map((stat) => ({
     id: stat.videoId,
+    kind: stat.video.kind,
+    kindAssumed: stat.video.kindAssumed,
     publishedAt: stat.video.publishedAt,
     viewCount: stat.viewCount,
   }));

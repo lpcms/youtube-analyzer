@@ -12,6 +12,7 @@ const CHANNELS = "https://www.googleapis.com/youtube/v3/channels";
 const PLAYLIST_ITEMS = "https://www.googleapis.com/youtube/v3/playlistItems";
 const VIDEOS = "https://www.googleapis.com/youtube/v3/videos";
 const SEARCH = "https://www.googleapis.com/youtube/v3/search";
+const SHORTS_PAGE = "https://www.youtube.com/shorts/:id";
 
 /** Идентификатор видео фиксированной длины 11 символов. */
 function videoId(i: number): string {
@@ -62,6 +63,9 @@ function mockChannelWithVideos(count: number) {
       const requested = new URL(request.url).searchParams.get("id")?.split(",") ?? [];
       return HttpResponse.json(videosResponse(requested));
     }),
+    // Подтверждение типа: нечётные видео в заглушке длятся 45 секунд
+    // и отвечают как настоящие Shorts, остальные сюда не попадают.
+    http.head(SHORTS_PAGE, () => new HttpResponse(null, { status: 200 })),
   );
   return ids;
 }
@@ -159,6 +163,43 @@ describe("выгрузка канала", () => {
     expect(run?.channelId).toBe(CHANNEL_ID);
   });
 
+  it("сохраняет подтверждённый тип: Shorts подтверждён, длинное — Video", async () => {
+    mockChannelWithVideos(4);
+
+    await fetchChannel("https://www.youtube.com/@MrBeast", { prisma: testPrisma });
+
+    const videos = await testPrisma.video.findMany({ orderBy: { id: "asc" } });
+    // Чётные — PT10M, нечётные — PT45S с ответом 200 на странице Shorts.
+    expect(videos.map((v) => v.kind)).toEqual(["VIDEO", "SHORTS", "VIDEO", "SHORTS"]);
+    // Тип подтверждён, а не выведен из одной длительности.
+    expect(videos.every((v) => !v.kindAssumed)).toBe(true);
+  });
+
+  it("короткое видео с редиректом на /watch получает тип Video", async () => {
+    mockChannelWithVideos(2);
+    server.use(
+      http.head(SHORTS_PAGE, () => HttpResponse.redirect("https://www.youtube.com/watch?v=x", 303)),
+    );
+
+    await fetchChannel("https://www.youtube.com/@MrBeast", { prisma: testPrisma });
+
+    const videos = await testPrisma.video.findMany({ orderBy: { id: "asc" } });
+    expect(videos.map((v) => v.kind)).toEqual(["VIDEO", "VIDEO"]);
+    expect(videos.every((v) => !v.kindAssumed)).toBe(true);
+  });
+
+  it("недоступная проверка оставляет тип предположительным, но выгрузку не роняет", async () => {
+    mockChannelWithVideos(2);
+    server.use(http.head(SHORTS_PAGE, () => HttpResponse.error()));
+
+    const result = await fetchChannel("https://www.youtube.com/@MrBeast", { prisma: testPrisma });
+
+    expect(result.ok).toBe(true);
+    const short = await testPrisma.video.findFirst({ where: { durationSec: 45 } });
+    expect(short?.kind).toBe("SHORTS");
+    expect(short?.kindAssumed).toBe(true);
+  });
+
   it("повторная выгрузка добавляет снимок, не плодя видео", async () => {
     mockChannelWithVideos(5);
 
@@ -220,6 +261,7 @@ describe("строки таблицы", () => {
     const rows = await videoRows(result.fetchRunId, { prisma: testPrisma });
 
     expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.kind === "VIDEO" || r.kind === "SHORTS")).toBe(true);
     const dates = rows.map((r) => r.publishedAt.getTime());
     expect(dates).toEqual([...dates].sort((a, b) => b - a));
     expect(rows[0]?.viewCount).toBe(1000);
