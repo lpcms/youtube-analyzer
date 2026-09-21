@@ -18,6 +18,22 @@ async function expectFieldError(page: Page, label: string, errorId: string, text
 }
 
 test.describe("валидация формы", () => {
+  test("кнопка «Начать» не сдвигается, когда появляется ошибка", async ({ page }) => {
+    await page.goto("/");
+
+    const start = page.getByRole("button", { name: "Начать" });
+    const before = await start.boundingBox();
+
+    await start.click();
+    await expect(page.locator("#channelUrl-error")).toBeVisible();
+
+    const after = await start.boundingBox();
+    // Сообщение появляется под строкой, а не внутри неё: иначе оно растило бы
+    // блок с полем и толкало кнопку вниз.
+    expect(Math.round(after?.y ?? 0)).toBe(Math.round(before?.y ?? -1));
+    expect(Math.round(after?.x ?? 0)).toBe(Math.round(before?.x ?? -1));
+  });
+
   test("пустой адрес даёт сообщение под полем", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: "Начать" }).click();

@@ -1,4 +1,4 @@
-import type { VideoRow } from "@/lib/fetch-channel";
+import type { VideoPage } from "@/lib/fetch-channel";
 import type { JobProgress } from "@/lib/job-status";
 import type { FieldErrors } from "@/lib/request-schema";
 
@@ -20,7 +20,7 @@ export const emptyFormState: FormState = { errors: {}, error: null, runId: null 
 /** Ответ на опрос задания. */
 export interface PollResult {
   readonly progress: JobProgress | null;
-  readonly rows: readonly VideoRow[];
+  readonly page: VideoPage;
 }
 
 /** Значения формы при первой загрузке: обе галочки включены — это из ТЗ. */

@@ -23,13 +23,14 @@ test.describe("ход выгрузки", () => {
     await expect(progress).toBeVisible();
     // Оценка объёма появляется после первой сохранённой страницы: до неё
     // API ещё не сказал, сколько всего видео на канале.
-    await expect(progress).toHaveText(/Получено \d+ из ~137…/, { timeout: 30_000 });
+    await expect(progress).toHaveText(/Получено \d+ из ~137 видео/, { timeout: 30_000 });
 
     // Пока задание идёт, повторное нажатие невозможно.
     await expect(page.getByRole("button", { name: "Выгружаю…" })).toBeDisabled();
 
     await expect(progress).toHaveText(`Готово: ${TOTAL}`, { timeout: 60_000 });
-    await expect(page.locator("tbody tr")).toHaveCount(TOTAL);
+    // Таблица показывает первую страницу, всего строк — в подписи под ней.
+    await expect(page.locator("tbody tr")).toHaveCount(50);
     await expect(start).toBeEnabled();
   });
 
@@ -77,7 +78,7 @@ test.describe("ход выгрузки", () => {
     const progress = page.locator("#fetch-progress");
     await expect(progress).toBeVisible({ timeout: 30_000 });
     await expect(progress).toHaveText(`Готово: ${TOTAL}`, { timeout: 60_000 });
-    await expect(page.locator("tbody tr")).toHaveCount(TOTAL);
+    await expect(page.locator("tbody tr")).toHaveCount(50);
   });
 
   test("чужой идентификатор задания объясняется, а не молчит", async ({ page }) => {

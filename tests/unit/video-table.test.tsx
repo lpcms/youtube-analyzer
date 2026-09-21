@@ -214,3 +214,33 @@ describe("сортировка в заголовках", () => {
     expect(onSort).toHaveBeenCalledWith("likeCount");
   });
 });
+
+describe("первая колонка", () => {
+  it("под ссылкой показано название ролика", () => {
+    show([row({ title: "Как я построил дом за 24 часа" })]);
+
+    const rowHeader = screen.getByRole("rowheader");
+    expect(within(rowHeader).getByRole("link")).toHaveAttribute(
+      "href",
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    );
+    expect(rowHeader).toHaveTextContent("Как я построил дом за 24 часа");
+  });
+
+  it("длинное название не рвёт вёрстку, но доступно целиком", () => {
+    const long = "Очень длинное название ролика, ".repeat(6);
+    show([row({ title: long })]);
+
+    // Обрезается стилями, поэтому полный текст остаётся в атрибуте title.
+    const rowHeader = screen.getByRole("rowheader");
+    const caption = rowHeader.querySelector("[title]");
+    expect(caption).toHaveAttribute("title", long);
+  });
+
+  it("название выводится как текст: разметка не исполняется", () => {
+    const { container } = show([row({ title: "<b>жирный</b>" })]);
+
+    expect(screen.getByText("<b>жирный</b>")).toBeInTheDocument();
+    expect(container.querySelector("b")).toBeNull();
+  });
+});

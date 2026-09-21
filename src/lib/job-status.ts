@@ -77,7 +77,11 @@ export function progressLabel(progress: JobProgress): string {
   const { status, processed, expected } = progress;
 
   if (status === "RUNNING") {
-    return expected === null ? `Получено ${processed}…` : `Получено ${processed} из ~${expected}…`;
+    // Слово «видео» вместо многоточия: многоточие ничего не сообщает,
+    // а единица измерения делает число понятным без догадок.
+    return expected === null
+      ? `Получено ${processed} видео`
+      : `Получено ${processed} из ~${expected} видео`;
   }
   if (status === "FAILED") return "Выгрузка не удалась";
   if (status === "PARTIAL") return `Собрано ${processed}, выгрузка прервана`;
