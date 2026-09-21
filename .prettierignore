@@ -1,0 +1,12 @@
+.next/
+node_modules/
+coverage/
+playwright-report/
+test-results/
+db/
+history/
+next-env.d.ts
+package-lock.json
+
+# Скиллы: часть из них вендорные, переформатирование дало бы шум в диффах
+.claude/

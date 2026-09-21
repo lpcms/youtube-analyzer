@@ -8,12 +8,13 @@
 
 ## Стек
 
-- **Next.js 15**, App Router, серверные действия. React 19, TypeScript в strict-режиме.
+- **Next.js 16** (Turbopack), App Router, серверные действия. React 19, TypeScript 5.9
+  в strict-режиме плюс `noUncheckedIndexedAccess`.
 - **Prisma + SQLite** (`better-sqlite3`) — история выгрузок и источник строк
   для таблицы.
 - **YouTube Data API v3** — единственный источник данных.
-- **Tailwind CSS** — оформление. **TanStack Table** — сортировка и пагинация.
-- **Vitest** + React Testing Library + MSW — модульные и интеграционные тесты.
+- **Tailwind CSS 4** — оформление. **TanStack Table** — сортировка и пагинация.
+- **Vitest 4** + React Testing Library + MSW — модульные и интеграционные тесты.
   **Playwright** — E2E.
 - **ESLint** + Prettier.
 
@@ -99,3 +100,13 @@ API их не отдаёт, а сторонние сервисы дают оце
 Цепочка скиллов: `prd` → `decompose` → `plan-phase` → `issues`. Задачи не
 придумываются в обход этой цепочки: источник задач один — `docs/tasks-*.md`.
 Язык issues и документов в `docs/` — русский.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
