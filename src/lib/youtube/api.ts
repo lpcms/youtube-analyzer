@@ -10,7 +10,12 @@
  */
 import "server-only";
 
-const API_BASE = "https://www.googleapis.com/youtube/v3";
+/**
+ * Адрес API. Переопределяется переменной окружения только ради E2E: запрос
+ * к YouTube уходит с сервера Next, и перехватить его из браузера нечем,
+ * поэтому на время прогона сервер смотрит на локальную заглушку.
+ */
+const API_BASE = process.env["YOUTUBE_API_BASE"] ?? "https://www.googleapis.com/youtube/v3";
 
 /** Цена вызова в единицах суточной квоты (10 000). */
 export const QUOTA_COST = {

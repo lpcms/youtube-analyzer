@@ -1,0 +1,139 @@
+/**
+ * Выгрузка видео канала.
+ *
+ * Перебор идёт по плейлисту загрузок, а не через `search.list`: `playlistItems`
+ * стоит 1 единицу квоты за 50 видео против 100 за один вызов поиска.
+ */
+
+import { callYouTube } from "./api";
+import { SHORTS_MAX_SECONDS, parseIsoDuration } from "./duration";
+
+/** Максимум, который YouTube отдаёт за один вызов. */
+export const PAGE_SIZE = 50;
+
+export interface FetchedVideo {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string;
+  readonly publishedAt: Date;
+  readonly durationSec: number;
+  /** Тип по длительности. Подтверждение через страницу Shorts добавит T-05. */
+  readonly kind: "VIDEO" | "SHORTS";
+  /** Пока тип определён только по длительности — это предположение. */
+  readonly kindAssumed: boolean;
+  /** null означает «статистика скрыта автором», а не ноль. */
+  readonly viewCount: number | null;
+  readonly likeCount: number | null;
+  readonly commentCount: number | null;
+}
+
+interface PlaylistItemsResponse {
+  items?: Array<{ contentDetails?: { videoId?: string } }>;
+  nextPageToken?: string;
+}
+
+interface VideosResponse {
+  items?: Array<{
+    id?: string;
+    snippet?: { title?: string; description?: string; publishedAt?: string };
+    contentDetails?: { duration?: string };
+    statistics?: { viewCount?: string; likeCount?: string; commentCount?: string };
+  }>;
+}
+
+/**
+ * Счётчик из ответа API. Отсутствующее поле — скрытая статистика, это null;
+ * присутствующий ноль — настоящий ноль. Путать их нельзя: формула вирусности
+ * обязана различать.
+ */
+function counter(raw: string | undefined): number | null {
+  if (raw === undefined) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Идентификаторы видео из плейлиста загрузок, не больше `limit`. */
+export async function fetchUploadIds(
+  uploadsPlaylistId: string,
+  limit: number,
+): Promise<readonly string[]> {
+  const ids: string[] = [];
+  let pageToken: string | undefined;
+
+  while (ids.length < limit) {
+    const params: Record<string, string> = {
+      part: "contentDetails",
+      playlistId: uploadsPlaylistId,
+      maxResults: String(Math.min(PAGE_SIZE, limit - ids.length)),
+    };
+    if (pageToken !== undefined) params["pageToken"] = pageToken;
+
+    const page = await callYouTube<PlaylistItemsResponse>("playlistItems.list", params);
+
+    for (const item of page.items ?? []) {
+      const id = item.contentDetails?.videoId;
+      if (id !== undefined && id !== "") ids.push(id);
+    }
+
+    if (page.nextPageToken === undefined) break;
+    pageToken = page.nextPageToken;
+  }
+
+  return ids.slice(0, limit);
+}
+
+/** Разбивает список на пакеты: `videos.list` принимает до 50 идентификаторов. */
+export function chunk<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+}
+
+/** Метрики и длительность для перечисленных видео. */
+export async function fetchVideoDetails(
+  videoIds: readonly string[],
+): Promise<readonly FetchedVideo[]> {
+  const result: FetchedVideo[] = [];
+
+  for (const batch of chunk(videoIds, PAGE_SIZE)) {
+    const response = await callYouTube<VideosResponse>("videos.list", {
+      part: "snippet,contentDetails,statistics",
+      id: batch.join(","),
+    });
+
+    for (const item of response.items ?? []) {
+      const id = item.id;
+      const published = item.snippet?.publishedAt;
+      if (id === undefined || published === undefined) continue;
+
+      const durationSec = parseIsoDuration(item.contentDetails?.duration) ?? 0;
+
+      result.push({
+        id,
+        title: item.snippet?.title ?? "",
+        description: item.snippet?.description ?? "",
+        publishedAt: new Date(published),
+        durationSec,
+        kind: durationSec <= SHORTS_MAX_SECONDS ? "SHORTS" : "VIDEO",
+        kindAssumed: durationSec <= SHORTS_MAX_SECONDS,
+        viewCount: counter(item.statistics?.viewCount),
+        likeCount: counter(item.statistics?.likeCount),
+        commentCount: counter(item.statistics?.commentCount),
+      });
+    }
+  }
+
+  return result;
+}
+
+/** Последние `limit` видео канала: идентификаторы из плейлиста, затем метрики. */
+export async function fetchChannelVideos(
+  uploadsPlaylistId: string,
+  limit: number,
+): Promise<readonly FetchedVideo[]> {
+  const ids = await fetchUploadIds(uploadsPlaylistId, limit);
+  if (ids.length === 0) return [];
+  return fetchVideoDetails(ids);
+}
