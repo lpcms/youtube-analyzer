@@ -1,5 +1,6 @@
 import type { VideoRow } from "@/lib/fetch-channel";
 import type { JobProgress } from "@/lib/job-status";
+import type { FieldErrors } from "@/lib/request-schema";
 
 /**
  * Состояние формы. Живёт отдельно от actions.ts: модуль с "use server"
@@ -7,11 +8,14 @@ import type { JobProgress } from "@/lib/job-status";
  * оттуда ломают сборку.
  */
 export interface FormState {
+  /** Ошибки по полям: сообщение показывается под своим полем. */
+  readonly errors: FieldErrors;
+  /** Отказ, не относящийся к конкретному полю: канал не найден, квота, сеть. */
   readonly error: string | null;
   readonly runId: string | null;
 }
 
-export const emptyFormState: FormState = { error: null, runId: null };
+export const emptyFormState: FormState = { errors: {}, error: null, runId: null };
 
 /** Ответ на опрос задания. */
 export interface PollResult {
@@ -36,3 +40,10 @@ export const DEFAULTS: FormDefaults = {
 
 /** Как часто интерфейс спрашивает о прогрессе. */
 export const POLL_INTERVAL_MS = 700;
+
+/** Идентификаторы элементов с сообщениями — на них смотрит aria-describedby. */
+export const ERROR_ID = {
+  channelUrl: "channelUrl-error",
+  count: "count-error",
+  types: "types-error",
+} as const;
