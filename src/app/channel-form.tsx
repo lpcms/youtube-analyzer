@@ -10,7 +10,8 @@ import {
 } from "react";
 import type { VideoRow } from "@/lib/fetch-channel";
 import { isRunning, progressLabel, type JobProgress } from "@/lib/job-status";
-import { pollFetch, startFetch } from "./actions";
+import { DEFAULT_SORT, nextSort, type SortColumn, type SortSpec } from "@/lib/sorting";
+import { pollFetch, sortRows, startFetch } from "./actions";
 import { DEFAULTS, ERROR_ID, POLL_INTERVAL_MS, emptyFormState, type FormState } from "./form-state";
 import { VideoTable } from "./video-table";
 
@@ -56,6 +57,7 @@ export function ChannelForm() {
   const [progress, setProgress] = useState<JobProgress | null>(null);
   const [rows, setRows] = useState<readonly VideoRow[]>([]);
   const [lost, setLost] = useState(false);
+  const [sort, setSort] = useState<SortSpec>(DEFAULT_SORT);
 
   // Задание берётся из ответа действия, а после перезагрузки — из адреса.
   // Это вычисляемое значение, а не состояние: дублировать его в useState
@@ -88,7 +90,7 @@ export function ChannelForm() {
     // Цикл опроса живёт внутри эффекта: так он сам себе доступен для
     // повторного вызова и гарантированно останавливается при размонтировании.
     const tick = async (): Promise<void> => {
-      const result = await pollFetch(runId);
+      const result = await pollFetch(runId, sort.column, sort.direction);
       if (cancelled) return;
 
       if (result.progress === null) {
@@ -114,7 +116,19 @@ export function ChannelForm() {
       cancelled = true;
       if (timer !== null) clearTimeout(timer);
     };
-  }, [runId]);
+  }, [runId, sort.column, sort.direction]);
+
+  /**
+   * Порядок задаётся базе, а не наводится по массиву в браузере: на выгрузке
+   * в десятки тысяч строк это разница между отзывчивой таблицей и зависшей.
+   */
+  function handleSort(column: SortColumn): void {
+    if (runId === null) return;
+
+    const next = nextSort(sort, column);
+    setSort(next);
+    void sortRows(runId, next.column, next.direction).then(setRows);
+  }
 
   const finished = progress !== null && !isRunning(progress.status);
 
@@ -262,7 +276,9 @@ export function ChannelForm() {
         </p>
       )}
 
-      {finished && progress.processed > 0 && <VideoTable rows={rows} />}
+      {finished && progress.processed > 0 && (
+        <VideoTable rows={rows} sort={sort} onSort={handleSort} />
+      )}
     </>
   );
 }

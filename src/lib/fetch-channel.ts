@@ -9,6 +9,7 @@ import "server-only";
 
 import type { PrismaClient } from "@/generated/prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
+import { DEFAULT_SORT, orderByFor, type SortSpec } from "@/lib/sorting";
 import { YouTubeApiError } from "@/lib/youtube/api";
 import { resolveChannel } from "@/lib/youtube/resolve-channel";
 import { fetchChannelVideos, type FetchLimit, type FetchSelection } from "@/lib/youtube/videos";
@@ -174,17 +175,23 @@ export interface VideoRow {
   readonly viralityScore: number | null;
 }
 
-/** Строки таблицы для выгрузки: метрики берутся из её собственного снимка. */
+/**
+ * Строки таблицы для выгрузки: метрики берутся из её собственного снимка.
+ *
+ * Порядок задаётся базе, а не наводится потом в браузере: сортировать
+ * десятки тысяч строк на каждый клик значит подвесить вкладку.
+ */
 export async function videoRows(
   fetchRunId: string,
-  options: { prisma?: PrismaClient } = {},
+  options: { prisma?: PrismaClient; sort?: SortSpec } = {},
 ): Promise<readonly VideoRow[]> {
   const db = options.prisma ?? defaultPrisma;
+  const sort = options.sort ?? DEFAULT_SORT;
 
   const stats = await db.videoStat.findMany({
     where: { fetchRunId },
     include: { video: true },
-    orderBy: { video: { publishedAt: "desc" } },
+    orderBy: orderByFor(sort),
   });
 
   return stats.map((stat) => ({
