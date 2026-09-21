@@ -1,27 +1,35 @@
 "use server";
 
-import { fetchChannel, videoRows, type FetchChannelError } from "@/lib/fetch-channel";
+import { videoRows } from "@/lib/fetch-channel";
+import { jobProgress, startJob, type StartFailure } from "@/lib/fetch-job";
+import { isRunning } from "@/lib/job-status";
 import type { FetchLimit } from "@/lib/youtube/videos";
-import { emptyFormState, type FormState } from "./form-state";
+import { emptyFormState, type FormState, type PollResult } from "./form-state";
 
 const MESSAGES: Record<string, string> = {
   empty: "Введите адрес канала",
   "foreign-host": "Это не адрес канала YouTube",
   unrecognized: "Адрес не похож на страницу канала",
   "not-found": "Канал не найден",
+  "no-types": "Выберите хотя бы один тип: Video или Shorts",
   "quota-exceeded": "Суточная квота YouTube API исчерпана — попробуйте завтра",
   "bad-key": "Ключ YouTube API не принят: проверьте YOUTUBE_API_KEY",
   network: "YouTube API недоступен",
+  unknown: "Не удалось выгрузить канал",
 };
 
-function messageFor(error: FetchChannelError): string {
-  switch (error.kind) {
+export async function failureMessage(reason: string): Promise<string> {
+  return MESSAGES[reason] ?? MESSAGES["unknown"]!;
+}
+
+function messageFor(failure: StartFailure): string {
+  switch (failure.kind) {
     case "invalid-url":
-      return MESSAGES[error.detail] ?? "Адрес не похож на страницу канала";
-    case "not-found":
-      return "Канал не найден";
+      return MESSAGES[failure.detail] ?? "Адрес не похож на страницу канала";
     case "api":
-      return MESSAGES[error.reason] ?? "Не удалось выгрузить канал";
+      return MESSAGES[failure.reason] ?? MESSAGES["unknown"]!;
+    default:
+      return MESSAGES[failure.kind] ?? MESSAGES["unknown"]!;
   }
 }
 
@@ -32,34 +40,40 @@ function messageFor(error: FetchChannelError): string {
 function readLimit(formData: FormData): FetchLimit {
   if (formData.get("allVideos") !== null) return null;
 
-  const raw = String(formData.get("count") ?? "").trim();
-  const parsed = Number(raw);
+  const parsed = Number(String(formData.get("count") ?? "").trim());
   if (!Number.isInteger(parsed) || parsed <= 0) return null;
   return parsed;
 }
 
+/**
+ * Заводит задание и сразу возвращает его id. Дожидаться выгрузки здесь нельзя:
+ * канал на тысячи роликов занял бы минуты, а страница всё это время висела бы.
+ */
 export async function startFetch(_prev: FormState, formData: FormData): Promise<FormState> {
-  const url = String(formData.get("channelUrl") ?? "");
-  const includeVideos = formData.get("includeVideos") !== null;
-  const includeShorts = formData.get("includeShorts") !== null;
-
-  if (!includeVideos && !includeShorts) {
-    return { ...emptyFormState, error: "Выберите хотя бы один тип: Video или Shorts" };
-  }
-
-  const result = await fetchChannel(url, {
+  const started = await startJob(String(formData.get("channelUrl") ?? ""), {
     limit: readLimit(formData),
-    includeVideos,
-    includeShorts,
+    includeVideos: formData.get("includeVideos") !== null,
+    includeShorts: formData.get("includeShorts") !== null,
   });
 
-  if (!result.ok) {
-    return { ...emptyFormState, error: messageFor(result.error) };
+  if (!started.ok) {
+    return { ...emptyFormState, error: messageFor(started.failure) };
   }
 
+  return { error: null, runId: started.runId };
+}
+
+/**
+ * Состояние задания. Строки отдаются, только когда выгрузка закончилась:
+ * во время работы таблица всё равно неполная, а запрос к БД на каждый
+ * опрос стоил бы дороже прогресса.
+ */
+export async function pollFetch(runId: string): Promise<PollResult> {
+  const progress = await jobProgress(runId);
+  if (progress === null) return { progress: null, rows: [] };
+
   return {
-    error: null,
-    channelId: result.channelId,
-    rows: await videoRows(result.fetchRunId),
+    progress,
+    rows: isRunning(progress.status) ? [] : await videoRows(runId),
   };
 }

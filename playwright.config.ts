@@ -27,7 +27,12 @@ export default defineConfig({
       url: `http://127.0.0.1:${mockPort}/channels`,
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
-      env: { MOCK_YOUTUBE_PORT: String(mockPort) },
+      env: {
+        MOCK_YOUTUBE_PORT: String(mockPort),
+        // Каждая страница отвечает с задержкой: иначе выгрузка заканчивается
+        // раньше, чем тест успевает посмотреть на прогресс.
+        MOCK_PAGE_DELAY_MS: "600",
+      },
     },
     {
       command: "npm run dev",
