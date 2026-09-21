@@ -1,0 +1,12 @@
+# Переводы строк нормализуются в LF в репозитории, в рабочей копии — родные для ОС.
+# Без этого на Windows git показывает изменёнными файлы, которых никто не трогал.
+* text=auto eol=lf
+
+# Двоичные форматы не трогать
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.xlsx binary
+*.db binary
