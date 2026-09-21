@@ -11,7 +11,7 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
 import { YouTubeApiError } from "@/lib/youtube/api";
 import { resolveChannel } from "@/lib/youtube/resolve-channel";
-import { fetchChannelVideos, type FetchLimit } from "@/lib/youtube/videos";
+import { fetchChannelVideos, type FetchLimit, type FetchSelection } from "@/lib/youtube/videos";
 import type { ConfirmOptions } from "@/lib/youtube/shorts-check";
 
 /**
@@ -38,10 +38,21 @@ export type FetchChannelError =
  */
 export async function fetchChannel(
   rawUrl: string,
-  options: { limit?: FetchLimit; prisma?: PrismaClient; shorts?: ConfirmOptions } = {},
+  options: {
+    limit?: FetchLimit;
+    includeVideos?: boolean;
+    includeShorts?: boolean;
+    prisma?: PrismaClient;
+    shorts?: ConfirmOptions;
+  } = {},
 ): Promise<FetchChannelResult> {
   // undefined означает «не указано» и даёт умолчание; null — осознанное «все».
   const limit = options.limit === undefined ? DEFAULT_LIMIT : options.limit;
+  const selection: FetchSelection = {
+    limit,
+    includeVideos: options.includeVideos ?? true,
+    includeShorts: options.includeShorts ?? true,
+  };
   const db = options.prisma ?? defaultPrisma;
 
   const resolved = await resolveChannel(rawUrl);
@@ -55,7 +66,7 @@ export async function fetchChannel(
 
   let videos;
   try {
-    videos = await fetchChannelVideos(channel.uploadsPlaylistId, limit, options.shorts ?? {});
+    videos = await fetchChannelVideos(channel.uploadsPlaylistId, selection, options.shorts ?? {});
   } catch (e) {
     if (e instanceof YouTubeApiError) {
       return { ok: false, error: { kind: "api", reason: e.kind, message: e.message } };
@@ -92,6 +103,8 @@ export async function fetchChannel(
       startedAt: now,
       finishedAt: new Date(),
       requestedLimit: limit,
+      includeVideos: selection.includeVideos,
+      includeShorts: selection.includeShorts,
       processedCount: videos.length,
       expectedCount: videos.length,
     },
