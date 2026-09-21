@@ -110,7 +110,7 @@ test.describe("выгрузка канала", () => {
     await page.getByRole("checkbox", { name: "Shorts", exact: true }).uncheck();
 
     await expect(page.getByRole("button", { name: "Начать" })).toBeDisabled();
-    await expect(page.locator("#types-hint")).toHaveText(
+    await expect(page.locator("#types-error")).toHaveText(
       "Выберите хотя бы один тип: Video или Shorts",
     );
   });

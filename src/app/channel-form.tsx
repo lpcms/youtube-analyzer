@@ -11,7 +11,7 @@ import {
 import type { VideoRow } from "@/lib/fetch-channel";
 import { isRunning, progressLabel, type JobProgress } from "@/lib/job-status";
 import { pollFetch, startFetch } from "./actions";
-import { DEFAULTS, POLL_INTERVAL_MS, emptyFormState, type FormState } from "./form-state";
+import { DEFAULTS, ERROR_ID, POLL_INTERVAL_MS, emptyFormState, type FormState } from "./form-state";
 import { VideoTable } from "./video-table";
 
 /**
@@ -68,6 +68,10 @@ export function ChannelForm() {
   const [includeVideos, setIncludeVideos] = useState(DEFAULTS.includeVideos);
   const [includeShorts, setIncludeShorts] = useState(DEFAULTS.includeShorts);
 
+  const urlError = state.errors.channelUrl;
+  const countError = state.errors.count;
+  const typesError = state.errors.types;
+
   const noTypeChosen = !includeVideos && !includeShorts;
   const working = submitting || (progress !== null && isRunning(progress.status));
 
@@ -116,7 +120,15 @@ export function ChannelForm() {
 
   return (
     <>
-      <form action={action} className="flex flex-col gap-4">
+      <form
+        action={action}
+        // noValidate: браузер со своей проверкой type=number блокирует
+        // отправку и показывает всплывающую подсказку вместо наших сообщений.
+        // Проверка всё равно делается на сервере, и говорить о ней должен
+        // один голос, а не два.
+        noValidate
+        className="flex flex-col gap-4"
+      >
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div className="flex-1">
             <label htmlFor="channelUrl" className="mb-1 block text-sm font-medium">
@@ -129,16 +141,21 @@ export function ChannelForm() {
               placeholder="https://www.youtube.com/@channel"
               // Сообщение об ошибке связано с полем программно, иначе скринридер
               // прочитает поле без причины отказа.
-              aria-describedby={state.error === null ? undefined : "channelUrl-error"}
-              aria-invalid={state.error !== null}
+              aria-describedby={urlError === undefined ? undefined : ERROR_ID.channelUrl}
+              aria-invalid={urlError !== undefined}
               className="w-full rounded border border-black/20 px-3 py-2 dark:border-white/25"
             />
+            {urlError !== undefined && (
+              <p id={ERROR_ID.channelUrl} role="alert" className="mt-1 text-sm text-red-600">
+                {urlError}
+              </p>
+            )}
           </div>
 
           <button
             type="submit"
             disabled={working || noTypeChosen}
-            aria-describedby={noTypeChosen ? "types-hint" : undefined}
+            aria-describedby={noTypeChosen ? ERROR_ID.types : undefined}
             className="rounded bg-red-600 px-5 py-2 font-medium text-white disabled:opacity-60"
           >
             {working ? "Выгружаю…" : "Начать"}
@@ -158,6 +175,8 @@ export function ChannelForm() {
               step={1}
               defaultValue={DEFAULTS.count}
               disabled={allVideos}
+              aria-describedby={countError === undefined ? undefined : ERROR_ID.count}
+              aria-invalid={countError !== undefined}
               className="w-24 rounded border border-black/20 px-2 py-1 disabled:opacity-50 dark:border-white/25"
             />
           </div>
@@ -196,15 +215,25 @@ export function ChannelForm() {
           </label>
         </div>
 
-        {noTypeChosen && (
-          <p id="types-hint" className="text-sm text-amber-700 dark:text-amber-500">
-            Выберите хотя бы один тип: Video или Shorts
+        {countError !== undefined && (
+          <p id={ERROR_ID.count} role="alert" className="text-sm text-red-600">
+            {countError}
+          </p>
+        )}
+
+        {(noTypeChosen || typesError !== undefined) && (
+          <p
+            id={ERROR_ID.types}
+            role="alert"
+            className="text-sm text-amber-700 dark:text-amber-500"
+          >
+            {typesError ?? "Выберите хотя бы один тип: Video или Shorts"}
           </p>
         )}
       </form>
 
       {state.error !== null && (
-        <p id="channelUrl-error" role="alert" className="mt-2 text-sm text-red-600">
+        <p role="alert" className="mt-2 text-sm text-red-600">
           {state.error}
         </p>
       )}
