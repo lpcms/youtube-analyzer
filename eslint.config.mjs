@@ -6,6 +6,8 @@ const config = [
     ignores: [
       ".next/**",
       "node_modules/**",
+      // Клиент Prisma генерируется и в репозиторий не коммитится.
+      "src/generated/**",
       "coverage/**",
       "playwright-report/**",
       "test-results/**",

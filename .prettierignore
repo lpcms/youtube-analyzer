@@ -1,5 +1,8 @@
 .next/
 node_modules/
+
+# Клиент Prisma генерируется — форматировать его незачем
+src/generated/
 coverage/
 playwright-report/
 test-results/

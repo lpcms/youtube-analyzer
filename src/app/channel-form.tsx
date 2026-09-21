@@ -1,12 +1,67 @@
 "use client";
 
-import { useActionState, useState } from "react";
-import { startFetch } from "./actions";
-import { DEFAULTS, emptyFormState, type FormState } from "./form-state";
+import {
+  useActionState,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import type { VideoRow } from "@/lib/fetch-channel";
+import { isRunning, progressLabel, type JobProgress } from "@/lib/job-status";
+import { pollFetch, startFetch } from "./actions";
+import { DEFAULTS, POLL_INTERVAL_MS, emptyFormState, type FormState } from "./form-state";
 import { VideoTable } from "./video-table";
 
+/**
+ * Адрес страницы помнит идентификатор задания, поэтому перезагрузка во время
+ * выгрузки её не теряет: опрос продолжится с того же места. Само задание
+ * крутится на сервере и от закрытия вкладки не зависит.
+ */
+const RUN_PARAM = "run";
+
+/**
+ * Идентификатор задания из адреса страницы.
+ *
+ * Через useSyncExternalStore, а не через эффект с setState: адрес — внешнее
+ * для React состояние, и читать его в эффекте значит вызывать лишний каскад
+ * перерисовок. На сервере адреса нет, поэтому серверный снимок — null,
+ * и расхождения при гидратации не возникает.
+ */
+function useRunIdFromUrl(): string | null {
+  return useSyncExternalStore(
+    (onChange) => {
+      window.addEventListener("popstate", onChange);
+      return () => window.removeEventListener("popstate", onChange);
+    },
+    () => new URLSearchParams(window.location.search).get(RUN_PARAM),
+    () => null,
+  );
+}
+
+function rememberRunId(runId: string | null): void {
+  const url = new URL(window.location.href);
+  if (runId === null) url.searchParams.delete(RUN_PARAM);
+  else url.searchParams.set(RUN_PARAM, runId);
+  window.history.replaceState(null, "", url.toString());
+}
+
 export function ChannelForm() {
-  const [state, action, pending] = useActionState<FormState, FormData>(startFetch, emptyFormState);
+  const [state, action, submitting] = useActionState<FormState, FormData>(
+    startFetch,
+    emptyFormState,
+  );
+
+  const [progress, setProgress] = useState<JobProgress | null>(null);
+  const [rows, setRows] = useState<readonly VideoRow[]>([]);
+  const [lost, setLost] = useState(false);
+
+  // Задание берётся из ответа действия, а после перезагрузки — из адреса.
+  // Это вычисляемое значение, а не состояние: дублировать его в useState
+  // значило бы синхронизировать два источника правды.
+  const urlRunId = useRunIdFromUrl();
+  const runId = state.runId ?? urlRunId;
 
   // Галочка «все видео» гасит поле с числом: держать их спорящими незачем.
   const [allVideos, setAllVideos] = useState(DEFAULTS.allVideos);
@@ -14,6 +69,50 @@ export function ChannelForm() {
   const [includeShorts, setIncludeShorts] = useState(DEFAULTS.includeShorts);
 
   const noTypeChosen = !includeVideos && !includeShorts;
+  const working = submitting || (progress !== null && isRunning(progress.status));
+
+  useEffect(() => {
+    if (runId === null) return;
+
+    // Адрес страницы помнит задание, чтобы перезагрузка его не потеряла.
+    // Это запись во внешнюю систему, а не состояние React.
+    rememberRunId(runId);
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    // Цикл опроса живёт внутри эффекта: так он сам себе доступен для
+    // повторного вызова и гарантированно останавливается при размонтировании.
+    const tick = async (): Promise<void> => {
+      const result = await pollFetch(runId);
+      if (cancelled) return;
+
+      if (result.progress === null) {
+        // Задания нет: адрес из прошлого запуска с другой базой.
+        setLost(true);
+        setProgress(null);
+        rememberRunId(null);
+        return;
+      }
+
+      setLost(false);
+      setProgress(result.progress);
+      setRows(result.rows);
+
+      if (isRunning(result.progress.status)) {
+        timer = setTimeout(() => void tick(), POLL_INTERVAL_MS);
+      }
+    };
+
+    void tick();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [runId]);
+
+  const finished = progress !== null && !isRunning(progress.status);
 
   return (
     <>
@@ -38,11 +137,11 @@ export function ChannelForm() {
 
           <button
             type="submit"
-            disabled={pending || noTypeChosen}
+            disabled={working || noTypeChosen}
             aria-describedby={noTypeChosen ? "types-hint" : undefined}
             className="rounded bg-red-600 px-5 py-2 font-medium text-white disabled:opacity-60"
           >
-            {pending ? "Выгружаю…" : "Начать"}
+            {working ? "Выгружаю…" : "Начать"}
           </button>
         </div>
 
@@ -110,7 +209,31 @@ export function ChannelForm() {
         </p>
       )}
 
-      {state.channelId !== null && <VideoTable rows={state.rows} />}
+      {lost && (
+        <p className="mt-3 text-sm opacity-70">
+          Эта выгрузка не найдена — возможно, она из прошлого запуска. Начните заново.
+        </p>
+      )}
+
+      {progress !== null && (
+        <p
+          id="fetch-progress"
+          // Прогресс меняется сам по себе: aria-live даёт скринридеру
+          // прочитать обновление, не уводя фокус.
+          aria-live="polite"
+          className="mt-3 text-sm tabular-nums opacity-80"
+        >
+          {progressLabel(progress)}
+        </p>
+      )}
+
+      {finished && progress.errorReason !== null && (
+        <p role="alert" className="mt-1 text-sm text-red-600">
+          Причина остановки: {progress.errorReason}
+        </p>
+      )}
+
+      {finished && progress.processed > 0 && <VideoTable rows={rows} />}
     </>
   );
 }

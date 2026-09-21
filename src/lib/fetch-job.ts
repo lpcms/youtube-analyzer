@@ -1,0 +1,274 @@
+/**
+ * Выгрузка как задание.
+ *
+ * Канал на тысячи роликов выгружается минутами. Дожидаться этого внутри одного
+ * запроса нельзя: пользователь видит висящую кнопку, а перезагрузка страницы
+ * теряет работу. Поэтому запуск и ожидание разделены:
+ *
+ *   createRun  — заводит FetchRun со статусом RUNNING и сразу отдаёт его id;
+ *   runJob     — крутит выгрузку, сохраняя каждую страницу и двигая прогресс;
+ *   jobProgress — отвечает на опрос из интерфейса.
+ *
+ * Состояние живёт в БД, а не в памяти процесса: перезагрузка страницы,
+ * вторая вкладка и повторный опрос видят одну и ту же картину.
+ */
+
+import "server-only";
+
+import type { PrismaClient } from "@/generated/prisma/client";
+import { prisma as defaultPrisma } from "@/lib/prisma";
+import { assertTransition, outcomeFor, type FetchStatus, type JobProgress } from "@/lib/job-status";
+import { YouTubeApiError } from "@/lib/youtube/api";
+import { resolveChannel } from "@/lib/youtube/resolve-channel";
+import type { ConfirmOptions } from "@/lib/youtube/shorts-check";
+import {
+  streamChannelVideos,
+  type FetchLimit,
+  type FetchSelection,
+  type FetchedVideo,
+} from "@/lib/youtube/videos";
+
+export type StartFailure =
+  | { readonly kind: "invalid-url"; readonly detail: "empty" | "foreign-host" | "unrecognized" }
+  | { readonly kind: "no-types" }
+  | { readonly kind: "not-found" }
+  | { readonly kind: "api"; readonly reason: string };
+
+export type StartResult =
+  | { readonly ok: true; readonly runId: string; readonly channelId: string }
+  | { readonly ok: false; readonly failure: StartFailure };
+
+export interface JobOptions {
+  readonly limit?: FetchLimit;
+  readonly includeVideos?: boolean;
+  readonly includeShorts?: boolean;
+  readonly prisma?: PrismaClient;
+  readonly shorts?: ConfirmOptions;
+}
+
+/**
+ * Заводит задание: разрешает канал и создаёт FetchRun.
+ *
+ * Разрешение канала делается здесь, а не в фоне, чтобы «канал не найден»
+ * и «это не адрес YouTube» пользователь увидел сразу, а не через опрос.
+ * Это один дешёвый вызов API.
+ */
+export async function createRun(rawUrl: string, options: JobOptions = {}): Promise<StartResult> {
+  const db = options.prisma ?? defaultPrisma;
+  const includeVideos = options.includeVideos ?? true;
+  const includeShorts = options.includeShorts ?? true;
+
+  if (!includeVideos && !includeShorts) {
+    return { ok: false, failure: { kind: "no-types" } };
+  }
+
+  let resolved;
+  try {
+    resolved = await resolveChannel(rawUrl);
+  } catch (e) {
+    if (e instanceof YouTubeApiError) {
+      return { ok: false, failure: { kind: "api", reason: e.kind } };
+    }
+    throw e;
+  }
+
+  if (!resolved.ok) {
+    return resolved.failure.reason === "invalid-url"
+      ? { ok: false, failure: { kind: "invalid-url", detail: resolved.failure.detail } }
+      : { ok: false, failure: { kind: "not-found" } };
+  }
+
+  const channel = resolved.channel;
+  const now = new Date();
+
+  await db.channel.upsert({
+    where: { id: channel.id },
+    // Канал мог сменить название, хэндл или аватар со времён прошлой выгрузки.
+    update: {
+      title: channel.title,
+      handle: channel.handle,
+      thumbnailUrl: channel.thumbnailUrl,
+      uploadsPlaylistId: channel.uploadsPlaylistId,
+      lastFetchedAt: now,
+    },
+    create: {
+      id: channel.id,
+      title: channel.title,
+      handle: channel.handle,
+      thumbnailUrl: channel.thumbnailUrl,
+      uploadsPlaylistId: channel.uploadsPlaylistId,
+      lastFetchedAt: now,
+    },
+  });
+
+  const run = await db.fetchRun.create({
+    data: {
+      channelId: channel.id,
+      status: "RUNNING",
+      startedAt: now,
+      requestedLimit: options.limit === undefined ? null : options.limit,
+      includeVideos,
+      includeShorts,
+      processedCount: 0,
+    },
+  });
+
+  return { ok: true, runId: run.id, channelId: channel.id };
+}
+
+/** Сохраняет порцию видео и двигает прогресс задания. */
+async function persistBatch(
+  db: PrismaClient,
+  runId: string,
+  channelId: string,
+  videos: readonly FetchedVideo[],
+  totalResults: number | null,
+): Promise<void> {
+  const now = new Date();
+
+  for (const video of videos) {
+    await db.video.upsert({
+      where: { id: video.id },
+      // Неизменное всё же обновляем: автор может переименовать видео
+      // или переписать описание.
+      update: {
+        title: video.title,
+        description: video.description,
+        durationSec: video.durationSec,
+        kind: video.kind,
+        kindAssumed: video.kindAssumed,
+        lastSeenAt: now,
+        goneAt: null,
+      },
+      create: {
+        id: video.id,
+        channelId,
+        kind: video.kind,
+        kindAssumed: video.kindAssumed,
+        durationSec: video.durationSec,
+        publishedAt: video.publishedAt,
+        title: video.title,
+        description: video.description,
+        firstSeenAt: now,
+        lastSeenAt: now,
+      },
+    });
+  }
+
+  // Снимки метрик заведомо новые — выгрузка только что создана, значит
+  // одна вставка вместо сотен.
+  await db.videoStat.createMany({
+    data: videos.map((video) => ({
+      videoId: video.id,
+      fetchRunId: runId,
+      viewCount: video.viewCount,
+      likeCount: video.likeCount,
+      commentCount: video.commentCount,
+    })),
+  });
+
+  await db.fetchRun.update({
+    where: { id: runId },
+    data: {
+      processedCount: { increment: videos.length },
+      ...(totalResults === null ? {} : { expectedCount: totalResults }),
+    },
+  });
+}
+
+async function finish(
+  db: PrismaClient,
+  runId: string,
+  status: FetchStatus,
+  errorReason: string | null,
+): Promise<void> {
+  const run = await db.fetchRun.findUniqueOrThrow({ where: { id: runId } });
+  // Переход проверяется явно: молча перезаписать терминальный статус значило бы
+  // потерять причину остановки.
+  assertTransition(run.status as FetchStatus, status);
+
+  await db.fetchRun.update({
+    where: { id: runId },
+    data: { status, finishedAt: new Date(), errorReason },
+  });
+}
+
+/**
+ * Выполняет задание до конца.
+ *
+ * Ошибка API не бросается наружу: она записывается в задание причиной
+ * остановки. Собранное до сбоя остаётся — частичный результат ценнее,
+ * чем ошибка вместо него.
+ */
+export async function runJob(runId: string, options: JobOptions = {}): Promise<void> {
+  const db = options.prisma ?? defaultPrisma;
+
+  const run = await db.fetchRun.findUniqueOrThrow({
+    where: { id: runId },
+    include: { channel: true },
+  });
+
+  const selection: FetchSelection = {
+    limit: run.requestedLimit,
+    includeVideos: run.includeVideos,
+    includeShorts: run.includeShorts,
+  };
+
+  let processed = 0;
+  let failure: string | null = null;
+
+  try {
+    for await (const batch of streamChannelVideos(
+      run.channel.uploadsPlaylistId,
+      selection,
+      options.shorts ?? {},
+    )) {
+      await persistBatch(db, runId, run.channelId, batch.videos, batch.totalResults);
+      processed += batch.videos.length;
+    }
+  } catch (e) {
+    if (e instanceof YouTubeApiError) {
+      failure = e.kind;
+    } else {
+      failure = "unknown";
+      console.error("[выгрузка] непредвиденный сбой", e);
+    }
+  }
+
+  await finish(db, runId, outcomeFor(processed, failure), failure);
+}
+
+/**
+ * Запускает задание и сразу возвращает управление.
+ *
+ * Работа продолжается в этом же процессе: сервис локальный, отдельная очередь
+ * ему ни к чему. Ошибки задания уже записаны в БД, поэтому здесь гасится
+ * только непредвиденное, чтобы не уронить процесс необработанным отказом.
+ */
+export async function startJob(rawUrl: string, options: JobOptions = {}): Promise<StartResult> {
+  const started = await createRun(rawUrl, options);
+  if (!started.ok) return started;
+
+  void runJob(started.runId, options).catch((e: unknown) => {
+    console.error("[выгрузка] задание упало", e);
+  });
+
+  return started;
+}
+
+/** Текущее состояние задания — ответ на опрос из интерфейса. */
+export async function jobProgress(
+  runId: string,
+  options: { prisma?: PrismaClient } = {},
+): Promise<JobProgress | null> {
+  const db = options.prisma ?? defaultPrisma;
+  const run = await db.fetchRun.findUnique({ where: { id: runId } });
+  if (run === null) return null;
+
+  return {
+    status: run.status as FetchStatus,
+    processed: run.processedCount,
+    expected: run.expectedCount,
+    errorReason: run.errorReason,
+  };
+}

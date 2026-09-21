@@ -33,6 +33,7 @@ export interface FetchedVideo {
 interface PlaylistItemsResponse {
   items?: Array<{ contentDetails?: { videoId?: string } }>;
   nextPageToken?: string;
+  pageInfo?: { totalResults?: number };
 }
 
 interface VideosResponse {
@@ -112,6 +113,8 @@ export interface FetchSelection {
 export interface UploadPage {
   readonly ids: readonly string[];
   readonly nextPageToken: string | undefined;
+  /** Сколько всего видео в плейлисте по оценке API — для прогресса. */
+  readonly totalResults: number | null;
 }
 
 /**
@@ -141,7 +144,11 @@ export async function fetchUploadPage(
     if (id !== undefined && id !== "") ids.push(id);
   }
 
-  return { ids, nextPageToken: page.nextPageToken };
+  return {
+    ids,
+    nextPageToken: page.nextPageToken,
+    totalResults: page.pageInfo?.totalResults ?? null,
+  };
 }
 
 /**
@@ -245,8 +252,15 @@ export async function fetchVideoDetails(
   return result;
 }
 
+/** Порция выгрузки: подходящие видео одной страницы плюс оценка объёма. */
+export interface VideoBatch {
+  readonly videos: readonly FetchedVideo[];
+  /** Всего видео на канале по оценке API; null — оценки нет. */
+  readonly totalResults: number | null;
+}
+
 /**
- * Видео канала выбранных типов, не больше заданного количества.
+ * Видео канала выбранных типов, порциями по мере обхода.
  *
  * Обход идёт страницами: для каждой страницы плейлиста запрашиваются метрики,
  * подтверждаются типы, отбираются подходящие. Как только набрано нужное
@@ -254,38 +268,63 @@ export async function fetchVideoDetails(
  *
  * Иначе было нельзя: тип видео API не сообщает, он становится известен только
  * после `videos.list`, поэтому «первые N Shorts» не вычислить заранее.
+ *
+ * Отдаётся порциями, а не одним списком: на канале в тысячи роликов выгрузка
+ * занимает минуты, и вызывающему нужно сохранять и показывать прогресс по ходу,
+ * а не ждать конца.
  */
-export async function fetchChannelVideos(
+export async function* streamChannelVideos(
   uploadsPlaylistId: string,
   selection: FetchSelection,
   options: ConfirmOptions = {},
-): Promise<readonly FetchedVideo[]> {
+): AsyncGenerator<VideoBatch> {
   const { limit, includeVideos, includeShorts } = selection;
 
-  if (!includeVideos && !includeShorts) return [];
+  if (!includeVideos && !includeShorts) return;
 
-  const collected: FetchedVideo[] = [];
+  let collected = 0;
   let pageToken: string | undefined;
 
-  while (limit === null || collected.length < limit) {
+  while (limit === null || collected < limit) {
     // Когда выбраны оба типа, подходит каждая строка, и просить у API больше
-    // остатка незачем. При отборе по типу сколько подойдёт — заранее неизвестно,
+    // остатка незачем. При отборе по типу сколько подойдёт заранее неизвестно,
     // поэтому берём полную страницу.
     const bothTypes = includeVideos && includeShorts;
     const maxResults =
-      limit !== null && bothTypes ? Math.min(PAGE_SIZE, limit - collected.length) : PAGE_SIZE;
+      limit !== null && bothTypes ? Math.min(PAGE_SIZE, limit - collected) : PAGE_SIZE;
 
     const page = await fetchUploadPage(uploadsPlaylistId, pageToken, maxResults);
 
     if (page.ids.length > 0) {
       const details = await fetchVideoDetails(page.ids);
       const resolved = await resolveKinds(details, options);
-      collected.push(...resolved.filter((v) => matchesSelection(v, selection)));
+      let matching = resolved.filter((v) => matchesSelection(v, selection));
+
+      // Последняя порция может перебрать: обрезаем, чтобы не сохранить лишнего.
+      if (limit !== null && collected + matching.length > limit) {
+        matching = matching.slice(0, limit - collected);
+      }
+
+      if (matching.length > 0) {
+        collected += matching.length;
+        yield { videos: matching, totalResults: page.totalResults };
+      }
     }
 
     if (page.nextPageToken === undefined) break;
     pageToken = page.nextPageToken;
   }
+}
 
-  return limit === null ? collected : collected.slice(0, limit);
+/** Все подходящие видео одним списком. Удобно там, где прогресс не нужен. */
+export async function fetchChannelVideos(
+  uploadsPlaylistId: string,
+  selection: FetchSelection,
+  options: ConfirmOptions = {},
+): Promise<readonly FetchedVideo[]> {
+  const all: FetchedVideo[] = [];
+  for await (const batch of streamChannelVideos(uploadsPlaylistId, selection, options)) {
+    all.push(...batch.videos);
+  }
+  return all;
 }

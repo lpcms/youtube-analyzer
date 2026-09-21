@@ -16,6 +16,10 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     globalSetup: ["./tests/db/global-setup.ts"],
+    // Интеграционные тесты ходят в настоящую SQLite и гоняют выгрузку целиком.
+    // Пяти секунд по умолчанию хватает не всегда, и тест начинает падать
+    // от загруженности машины, а не от логики.
+    testTimeout: 20_000,
     setupFiles: ["./tests/setup.ts"],
     // E2E живут отдельно и запускаются Playwright — сюда попадать не должны.
     include: ["tests/unit/**/*.test.{ts,tsx}", "src/**/*.test.{ts,tsx}"],

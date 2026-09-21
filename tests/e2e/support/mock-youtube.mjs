@@ -36,6 +36,14 @@ function channels() {
   };
 }
 
+/**
+ * Задержка на страницу. Без неё выгрузка успевает кончиться раньше, чем тест
+ * посмотрит на прогресс, и проверять было бы нечего.
+ */
+const PAGE_DELAY_MS = Number(process.env.MOCK_PAGE_DELAY_MS ?? 0);
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 function playlistItems(params) {
   const maxResults = Number(params.get("maxResults") ?? PAGE_SIZE);
   const offset = Number(params.get("pageToken") ?? "0");
@@ -44,6 +52,8 @@ function playlistItems(params) {
 
   return {
     items: slice.map((id) => ({ contentDetails: { videoId: id } })),
+    // Оценка объёма — из неё интерфейс строит «из ~137».
+    pageInfo: { totalResults: TOTAL },
     ...(next < videoIds.length ? { nextPageToken: String(next) } : {}),
   };
 }
@@ -70,7 +80,7 @@ function videos(requested) {
   };
 }
 
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
 
   // Страница Shorts: настоящий Short отвечает 200, обычное видео —
@@ -89,8 +99,10 @@ const server = createServer((req, res) => {
   let body;
 
   if (url.pathname.endsWith("/channels")) body = channels();
-  else if (url.pathname.endsWith("/playlistItems")) body = playlistItems(url.searchParams);
-  else if (url.pathname.endsWith("/videos"))
+  else if (url.pathname.endsWith("/playlistItems")) {
+    if (PAGE_DELAY_MS > 0) await sleep(PAGE_DELAY_MS);
+    body = playlistItems(url.searchParams);
+  } else if (url.pathname.endsWith("/videos"))
     body = videos((url.searchParams.get("id") ?? "").split(","));
   else {
     res.writeHead(404).end("{}");
