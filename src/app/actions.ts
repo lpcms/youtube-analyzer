@@ -1,9 +1,10 @@
 "use server";
 
-import { videoRows } from "@/lib/fetch-channel";
+import { videoPage, type VideoPage } from "@/lib/fetch-channel";
 import { jobProgress, startJob, type StartFailure } from "@/lib/fetch-job";
 import { isRunning } from "@/lib/job-status";
 import { readForm, validateRequest } from "@/lib/request-schema";
+import { parsePage } from "@/lib/pagination";
 import { parseSort } from "@/lib/sorting";
 import { emptyFormState, type FormState, type PollResult } from "./form-state";
 
@@ -54,32 +55,44 @@ export async function startFetch(_prev: FormState, formData: FormData): Promise<
  * во время работы таблица всё равно неполная, а запрос к БД на каждый
  * опрос стоил бы дороже прогресса.
  */
+const EMPTY_PAGE: VideoPage = { rows: [], total: 0, page: 1, pageCount: 1 };
+
 export async function pollFetch(
   runId: string,
   sortColumn: string | null = null,
   sortDirection: string | null = null,
+  page: number | null = null,
+  pageSize: number | null = null,
 ): Promise<PollResult> {
   const progress = await jobProgress(runId);
-  if (progress === null) return { progress: null, rows: [] };
+  if (progress === null) return { progress: null, page: EMPTY_PAGE };
 
-  const sort = parseSort(sortColumn, sortDirection);
+  if (isRunning(progress.status)) return { progress, page: EMPTY_PAGE };
 
   return {
     progress,
-    rows: isRunning(progress.status) ? [] : await videoRows(runId, { sort }),
+    page: await videoPage(runId, {
+      sort: parseSort(sortColumn, sortDirection),
+      page: parsePage(page, pageSize),
+    }),
   };
 }
 
 /**
- * Перечитывает строки в другом порядке.
+ * Перечитывает страницу таблицы: другой порядок, другой номер или размер.
  *
- * Отдельным действием, а не повторным опросом: менять порядок можно и когда
- * выгрузка давно закончилась, и дёргать ради этого прогресс ни к чему.
+ * Отдельным действием, а не повторным опросом: листать и сортировать можно
+ * и когда выгрузка давно закончилась, а дёргать ради этого прогресс ни к чему.
  */
-export async function sortRows(
+export async function fetchPage(
   runId: string,
   sortColumn: string,
   sortDirection: string,
-): Promise<PollResult["rows"]> {
-  return videoRows(runId, { sort: parseSort(sortColumn, sortDirection) });
+  page: number,
+  pageSize: number,
+): Promise<VideoPage> {
+  return videoPage(runId, {
+    sort: parseSort(sortColumn, sortDirection),
+    page: parsePage(page, pageSize),
+  });
 }

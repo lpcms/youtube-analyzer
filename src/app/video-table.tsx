@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import type { VideoRow } from "@/lib/fetch-channel";
 import {
   descriptionPreview,
@@ -31,11 +32,77 @@ const COLUMNS: ReadonlyArray<{
   { label: "Описание", column: null, numeric: false },
 ];
 
+/**
+ * Вторая полоса прокрутки — над таблицей.
+ *
+ * Таблица из девяти колонок шире экрана, и чтобы прокрутить её вбок, иначе
+ * пришлось бы уезжать в самый низ страницы за нижней полосой. Верхняя полоса
+ * это пустой блок шириной с таблицу; обе полосы зеркалят друг друга.
+ *
+ * Ширина и прокрутка правятся прямо в DOM, без состояния React: это внешняя
+ * система, и гонять через неё перерисовку на каждый пиксель прокрутки незачем.
+ */
+function useMirroredScroll(rowsKey: number) {
+  const topRef = useRef<HTMLDivElement>(null);
+  const spacerRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+
+  useEffect(() => {
+    const top = topRef.current;
+    const spacer = spacerRef.current;
+    const bottom = bottomRef.current;
+    const table = tableRef.current;
+    if (top === null || spacer === null || bottom === null || table === null) return;
+
+    const syncWidth = (): void => {
+      spacer.style.width = `${table.scrollWidth}px`;
+    };
+    syncWidth();
+
+    const observer = new ResizeObserver(syncWidth);
+    observer.observe(table);
+
+    // Замок против эха: прокрутка одной полосы двигает вторую, та шлёт
+    // своё событие обратно — без него они дёргались бы друг об друга.
+    let syncing = false;
+    const mirror = (from: HTMLDivElement, to: HTMLDivElement) => () => {
+      if (syncing) return;
+      syncing = true;
+      to.scrollLeft = from.scrollLeft;
+      syncing = false;
+    };
+
+    const onTop = mirror(top, bottom);
+    const onBottom = mirror(bottom, top);
+    top.addEventListener("scroll", onTop);
+    bottom.addEventListener("scroll", onBottom);
+
+    return () => {
+      observer.disconnect();
+      top.removeEventListener("scroll", onTop);
+      bottom.removeEventListener("scroll", onBottom);
+    };
+  }, [rowsKey]);
+
+  return { topRef, spacerRef, bottomRef, tableRef };
+}
+
 function KindCell({ row }: { row: VideoRow }) {
   const label = KIND_LABEL[row.kind];
 
   if (!row.kindAssumed) {
-    return <>{label}</>;
+    return (
+      <span
+        className={
+          row.kind === "SHORTS"
+            ? "rounded bg-fuchsia-500/12 px-2 py-0.5 text-fuchsia-800 dark:text-fuchsia-300"
+            : "rounded bg-sky-500/12 px-2 py-0.5 text-sky-800 dark:text-sky-300"
+        }
+      >
+        {label}
+      </span>
+    );
   }
 
   // Подтвердить тип не удалось — он выведен из одной длительности.
@@ -43,7 +110,7 @@ function KindCell({ row }: { row: VideoRow }) {
   return (
     <span
       title="Тип определён по длительности: подтвердить через страницу Shorts не удалось"
-      className="border-b border-dotted border-current opacity-70"
+      className="rounded border border-dotted border-current px-2 py-0.5 opacity-70"
     >
       {label}&nbsp;?
     </span>
@@ -66,23 +133,24 @@ function DescriptionCell({ text }: { text: string }) {
   }
 
   if (!isDescriptionTruncated(text)) {
-    return <span className="whitespace-pre-wrap">{text.trim()}</span>;
+    return <span className="whitespace-pre-wrap opacity-80">{text.trim()}</span>;
   }
 
   return (
     <details className="group">
-      <summary className="cursor-pointer list-none marker:content-none">
-        <span className="group-open:hidden">{descriptionPreview(text)}</span>
+      <summary className="cursor-pointer list-none marker:content-none hover:underline">
+        <span className="opacity-80 group-open:hidden">{descriptionPreview(text)}</span>
         <span className="hidden text-xs underline underline-offset-2 opacity-60 group-open:inline">
           свернуть
         </span>
       </summary>
-      <span className="mt-1 block whitespace-pre-wrap">{text.trim()}</span>
+      <span className="mt-1 block whitespace-pre-wrap opacity-80">{text.trim()}</span>
     </details>
   );
 }
 
-const NUMERIC = "py-2 pr-4 text-right tabular-nums";
+const CELL = "px-3 py-2.5 align-top";
+const NUMERIC = `${CELL} text-right tabular-nums`;
 
 export interface VideoTableProps {
   readonly rows: readonly VideoRow[];
@@ -91,79 +159,103 @@ export interface VideoTableProps {
 }
 
 export function VideoTable({ rows, sort, onSort }: VideoTableProps) {
+  const { topRef, spacerRef, bottomRef, tableRef } = useMirroredScroll(rows.length);
+
   if (rows.length === 0) {
     return <p className="mt-6 text-sm opacity-70">У этого канала нет видео.</p>;
   }
 
   return (
-    <div className="mt-6 overflow-x-auto">
-      <table className="w-full min-w-5xl border-collapse text-sm">
-        <caption className="sr-only">Видео канала с метриками</caption>
-        <thead>
-          <tr className="border-b border-black/15 text-left dark:border-white/20">
-            {COLUMNS.map(({ label, column, numeric }) => (
-              <th
-                key={label}
-                scope="col"
-                // aria-sort сообщает направление скринридеру; у несортируемых
-                // колонок атрибута нет вовсе, иначе «none» звучал бы как
-                // «сортировка сброшена», хотя её и не предлагают.
-                aria-sort={column === null ? undefined : ariaSort(sort, column)}
-                className={`py-2 pr-4 font-medium ${numeric ? "text-right" : ""}`}
-              >
-                {column === null ? (
-                  label
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onSort(column)}
-                    className="inline-flex cursor-pointer items-center gap-1 font-medium underline-offset-4 hover:underline"
-                  >
-                    {label}
-                    <span aria-hidden="true" className="w-3 text-xs">
-                      {sortArrow(sort, column)}
-                    </span>
-                  </button>
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id} className="border-b border-black/8 align-top dark:border-white/10">
-              {/* Ссылка — опознавательная ячейка строки, поэтому th со scope="row". */}
-              <th scope="row" className="py-2 pr-4 font-normal whitespace-nowrap">
-                <a
-                  href={videoUrl(row.id)}
-                  target="_blank"
-                  // noreferrer вместе с noopener: без них открытая вкладка
-                  // получает доступ к window.opener.
-                  rel="noopener noreferrer"
-                  title={row.title}
-                  className="text-blue-700 underline underline-offset-2 dark:text-blue-400"
+    <div className="mt-6">
+      {/* Верхняя полоса прокрутки: пустая, но шириной с таблицу. */}
+      <div ref={topRef} aria-hidden="true" className="overflow-x-auto overflow-y-hidden">
+        <div ref={spacerRef} className="h-3" />
+      </div>
+
+      <div
+        ref={bottomRef}
+        className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15"
+      >
+        <table
+          ref={tableRef}
+          className="w-full min-w-[1180px] border-collapse text-sm leading-snug"
+        >
+          <caption className="sr-only">Видео канала с метриками</caption>
+          <thead>
+            <tr className="bg-black/[0.04] text-left dark:bg-white/[0.06]">
+              {COLUMNS.map(({ label, column, numeric }) => (
+                <th
+                  key={label}
+                  scope="col"
+                  // aria-sort сообщает направление скринридеру; у несортируемых
+                  // колонок атрибута нет вовсе, иначе «none» звучал бы как
+                  // «сортировка сброшена», хотя её и не предлагают.
+                  aria-sort={column === null ? undefined : ariaSort(sort, column)}
+                  className={`border-b border-black/10 px-3 py-2.5 font-semibold whitespace-nowrap dark:border-white/15 ${
+                    numeric ? "text-right" : ""
+                  }`}
                 >
-                  {videoUrl(row.id)}
-                </a>
-              </th>
-              <td className="py-2 pr-4 whitespace-nowrap">
-                <KindCell row={row} />
-              </td>
-              <td className={NUMERIC}>{formatDuration(row.durationSec)}</td>
-              <td className={NUMERIC}>{formatCount(row.viewCount)}</td>
-              <td className={NUMERIC}>{formatCount(row.likeCount)}</td>
-              <td className={NUMERIC}>{formatCount(row.commentCount)}</td>
-              <td className={NUMERIC}>{formatVirality(row.viralityScore)}</td>
-              <td className="py-2 pr-4 whitespace-nowrap tabular-nums">
-                {formatDateTime(row.publishedAt)}
-              </td>
-              <td className="max-w-md py-2">
-                <DescriptionCell text={row.description} />
-              </td>
+                  {column === null ? (
+                    label
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onSort(column)}
+                      className="inline-flex cursor-pointer items-center gap-1 font-semibold underline-offset-4 hover:underline"
+                    >
+                      {label}
+                      <span aria-hidden="true" className="w-3 text-xs">
+                        {sortArrow(sort, column)}
+                      </span>
+                    </button>
+                  )}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr
+                key={row.id}
+                className="border-b border-black/8 last:border-0 odd:bg-black/[0.015] hover:bg-amber-500/8 dark:border-white/10 dark:odd:bg-white/[0.03]"
+              >
+                {/* Ссылка — опознавательная ячейка строки, поэтому th со scope="row". */}
+                <th scope="row" className={`${CELL} max-w-xs font-normal`}>
+                  <a
+                    href={videoUrl(row.id)}
+                    target="_blank"
+                    // noreferrer вместе с noopener: без них открытая вкладка
+                    // получает доступ к window.opener.
+                    rel="noopener noreferrer"
+                    className="block truncate text-blue-700 underline underline-offset-2 dark:text-blue-400"
+                  >
+                    {videoUrl(row.id)}
+                  </a>
+                  {/* Название под ссылкой: по одному идентификатору видео
+                      не узнать, а открывать вкладку ради этого накладно. */}
+                  <span className="mt-0.5 block truncate text-xs opacity-60" title={row.title}>
+                    {row.title}
+                  </span>
+                </th>
+                <td className={`${CELL} whitespace-nowrap`}>
+                  <KindCell row={row} />
+                </td>
+                <td className={NUMERIC}>{formatDuration(row.durationSec)}</td>
+                <td className={NUMERIC}>{formatCount(row.viewCount)}</td>
+                <td className={NUMERIC}>{formatCount(row.likeCount)}</td>
+                <td className={NUMERIC}>{formatCount(row.commentCount)}</td>
+                <td className={`${NUMERIC} font-medium`}>{formatVirality(row.viralityScore)}</td>
+                <td className={`${CELL} whitespace-nowrap tabular-nums`}>
+                  {formatDateTime(row.publishedAt)}
+                </td>
+                <td className={`${CELL} min-w-[22rem]`}>
+                  <DescriptionCell text={row.description} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

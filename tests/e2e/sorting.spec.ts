@@ -13,7 +13,11 @@ async function fetchChannel(page: Page): Promise<void> {
   await page.goto("/");
   await page.getByLabel("Адрес канала").fill("https://www.youtube.com/@e2e");
   await page.getByRole("button", { name: "Начать" }).click();
-  await expect(page.locator("tbody tr")).toHaveCount(TOTAL, { timeout: 60_000 });
+  await expect(page.locator("tbody tr")).toHaveCount(50, { timeout: 60_000 });
+  // Сортировка проверяется на всей выгрузке, поэтому убираем разбивку,
+  // насколько позволяет самый крупный размер страницы.
+  await page.getByLabel("Строк на странице").selectOption("100");
+  await expect(page.locator("tbody tr")).toHaveCount(100, { timeout: 30_000 });
 }
 
 /**
@@ -43,7 +47,8 @@ test.describe("сортировка", () => {
     await fetchChannel(page);
 
     await page.getByRole("button", { name: /Просмотры/ }).click();
-    // Самое просматриваемое в заглушке — последнее по номеру.
+    // Самое просматриваемое в заглушке — последнее по номеру. Оно должно
+    // оказаться первым на первой странице, а не лучшим из сотни видимых.
     await expectFirstCell(page, 4, String(1000 * TOTAL).replace(/\B(?=(\d{3})+$)/g, " "));
 
     const views = await column(page, 4);

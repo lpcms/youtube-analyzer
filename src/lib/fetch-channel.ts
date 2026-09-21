@@ -9,6 +9,7 @@ import "server-only";
 
 import type { PrismaClient } from "@/generated/prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
+import { FIRST_PAGE, clampPage, offsetFor, pageCount, type PageSpec } from "@/lib/pagination";
 import { DEFAULT_SORT, orderByFor, type SortSpec } from "@/lib/sorting";
 import { YouTubeApiError } from "@/lib/youtube/api";
 import { resolveChannel } from "@/lib/youtube/resolve-channel";
@@ -175,7 +176,30 @@ export interface VideoRow {
   readonly viralityScore: number | null;
 }
 
+type StatWithVideo = Awaited<ReturnType<PrismaClient["videoStat"]["findMany"]>>[number] & {
+  video: Awaited<ReturnType<PrismaClient["video"]["findMany"]>>[number];
+};
+
+function toRow(stat: StatWithVideo): VideoRow {
+  return {
+    id: stat.videoId,
+    title: stat.video.title,
+    kind: stat.video.kind,
+    kindAssumed: stat.video.kindAssumed,
+    durationSec: stat.video.durationSec,
+    publishedAt: stat.video.publishedAt,
+    description: stat.video.description,
+    viewCount: stat.viewCount,
+    likeCount: stat.likeCount,
+    commentCount: stat.commentCount,
+    viralityScore: stat.viralityScore,
+  };
+}
+
 /**
+ * Все строки выгрузки без разбивки. Нужны выгрузке в Excel — там страницы
+ * ни при чём.
+ *
  * Строки таблицы для выгрузки: метрики берутся из её собственного снимка.
  *
  * Порядок задаётся базе, а не наводится потом в браузере: сортировать
@@ -194,19 +218,53 @@ export async function videoRows(
     orderBy: orderByFor(sort),
   });
 
-  return stats.map((stat) => ({
-    id: stat.videoId,
-    title: stat.video.title,
-    kind: stat.video.kind,
-    kindAssumed: stat.video.kindAssumed,
-    durationSec: stat.video.durationSec,
-    publishedAt: stat.video.publishedAt,
-    description: stat.video.description,
-    viewCount: stat.viewCount,
-    likeCount: stat.likeCount,
-    commentCount: stat.commentCount,
-    viralityScore: stat.viralityScore,
-  }));
+  return stats.map(toRow);
+}
+
+export interface VideoPage {
+  readonly rows: readonly VideoRow[];
+  /** Всего строк в выгрузке, а не на странице. */
+  readonly total: number;
+  readonly page: number;
+  readonly pageCount: number;
+}
+
+/**
+ * Одна страница таблицы.
+ *
+ * limit и offset задаются базе: отрезать страницу от уже полученного массива
+ * значило бы тащить в браузер всю выгрузку ради полусотни видимых строк.
+ *
+ * Номер страницы загоняется в границы: после смены размера или сортировки
+ * запрошенная страница может оказаться за краем, и «страница 9 из 3» с пустой
+ * таблицей выглядела бы поломкой.
+ */
+export async function videoPage(
+  fetchRunId: string,
+  options: { prisma?: PrismaClient; sort?: SortSpec; page?: PageSpec } = {},
+): Promise<VideoPage> {
+  const db = options.prisma ?? defaultPrisma;
+  const sort = options.sort ?? DEFAULT_SORT;
+  const requested = options.page ?? FIRST_PAGE;
+
+  const total = await db.videoStat.count({ where: { fetchRunId } });
+  const page = clampPage(requested.page, total, requested.pageSize);
+  const spec: PageSpec = { page, pageSize: requested.pageSize };
+
+  const stats = await db.videoStat.findMany({
+    where: { fetchRunId },
+    include: { video: true },
+    orderBy: orderByFor(sort),
+    skip: offsetFor(spec),
+    take: spec.pageSize,
+  });
+
+  return {
+    rows: stats.map(toRow),
+    total,
+    page,
+    pageCount: pageCount(total, spec.pageSize),
+  };
 }
 
 /** Последняя выгрузка канала — её и показываем, когда страница перезагружена. */

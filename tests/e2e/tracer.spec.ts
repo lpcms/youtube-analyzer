@@ -12,11 +12,20 @@ import { expect, test, type Page } from "@playwright/test";
 /** Столько видео у канала в заглушке. */
 const TOTAL = 137;
 
-async function fetchChannel(page: Page, expected = TOTAL): Promise<void> {
+/** Размер страницы по умолчанию: таблица показывает её, а не всю выгрузку. */
+const PAGE_SIZE = 50;
+
+async function fetchChannel(page: Page, expected = PAGE_SIZE): Promise<void> {
   await page.goto("/");
   await page.getByLabel("Адрес канала").fill("https://www.youtube.com/@e2e");
   await page.getByRole("button", { name: "Начать" }).click();
   await expect(page.locator("tbody tr")).toHaveCount(expected, { timeout: 60_000 });
+}
+
+/** Показывает всю выгрузку на одной странице — там, где так удобнее проверять. */
+async function showAll(page: Page): Promise<void> {
+  await page.getByLabel("Строк на странице").selectOption("100");
+  await expect(page.locator("tbody tr")).toHaveCount(100, { timeout: 30_000 });
 }
 
 test.describe("выгрузка канала", () => {
@@ -26,11 +35,14 @@ test.describe("выгрузка канала", () => {
     const rows = page.locator("tbody tr");
 
     // Ни одной повторяющейся ссылки: дублей нет, пропусков тоже.
+    // Число строк выгрузки сообщает подпись под таблицей.
+    await expect(page.locator("#row-count")).toHaveText(new RegExp(String(TOTAL)));
+
     const links = await rows
       .getByRole("link")
       .evaluateAll((els) => els.map((e) => e.getAttribute("href")));
-    expect(links).toHaveLength(TOTAL);
-    expect(new Set(links).size).toBe(TOTAL);
+    expect(links).toHaveLength(PAGE_SIZE);
+    expect(new Set(links).size).toBe(PAGE_SIZE);
 
     // Все девять колонок из ТЗ, в заданном порядке. Стрелка направления
     // сортировки декоративная (aria-hidden) и в название колонки не входит.
@@ -135,7 +147,18 @@ test.describe("выгрузка канала", () => {
     const likes = await page.locator("tbody tr td:nth-child(5)").allInnerTexts();
     expect(likes.filter((t) => t.trim() === "н/д").length).toBeGreaterThan(0);
 
-    // А у первого видео ноль комментариев — это настоящий ноль.
+    // Видео с нулём комментариев самое старое, по умолчанию оно в конце
+    // выгрузки — разворачиваем порядок, чтобы попало на первую страницу.
+    await page.getByRole("button", { name: /Дата/ }).click();
+    await expect(page.getByRole("columnheader", { name: /Дата/ })).toHaveAttribute(
+      "aria-sort",
+      "ascending",
+    );
+    await expect(page.locator("tbody tr").first().locator("td:nth-child(6)")).toHaveText("0", {
+      timeout: 15_000,
+    });
+
+    // Ноль комментариев — это настоящий ноль, а не «н/д».
     const comments = await page.locator("tbody tr td:nth-child(6)").allInnerTexts();
     expect(comments.some((t) => t.trim() === "0")).toBe(true);
   });

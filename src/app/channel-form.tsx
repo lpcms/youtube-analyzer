@@ -8,12 +8,17 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { VideoRow } from "@/lib/fetch-channel";
-import { isRunning, progressLabel, type JobProgress } from "@/lib/job-status";
+import type { VideoPage } from "@/lib/fetch-channel";
+import { isRunning, type JobProgress } from "@/lib/job-status";
+import { FIRST_PAGE, pageAfterResize, type PageSize, type PageSpec } from "@/lib/pagination";
 import { DEFAULT_SORT, nextSort, type SortColumn, type SortSpec } from "@/lib/sorting";
-import { pollFetch, sortRows, startFetch } from "./actions";
+import { fetchPage, pollFetch, startFetch } from "./actions";
+import { FetchProgress } from "./fetch-progress";
 import { DEFAULTS, ERROR_ID, POLL_INTERVAL_MS, emptyFormState, type FormState } from "./form-state";
+import { TablePager } from "./table-pager";
 import { VideoTable } from "./video-table";
+
+const EMPTY_PAGE: VideoPage = { rows: [], total: 0, page: 1, pageCount: 1 };
 
 /**
  * Адрес страницы помнит идентификатор задания, поэтому перезагрузка во время
@@ -55,9 +60,10 @@ export function ChannelForm() {
   );
 
   const [progress, setProgress] = useState<JobProgress | null>(null);
-  const [rows, setRows] = useState<readonly VideoRow[]>([]);
+  const [table, setTable] = useState<VideoPage>(EMPTY_PAGE);
   const [lost, setLost] = useState(false);
   const [sort, setSort] = useState<SortSpec>(DEFAULT_SORT);
+  const [pageSpec, setPageSpec] = useState<PageSpec>(FIRST_PAGE);
 
   // Задание берётся из ответа действия, а после перезагрузки — из адреса.
   // Это вычисляемое значение, а не состояние: дублировать его в useState
@@ -90,7 +96,13 @@ export function ChannelForm() {
     // Цикл опроса живёт внутри эффекта: так он сам себе доступен для
     // повторного вызова и гарантированно останавливается при размонтировании.
     const tick = async (): Promise<void> => {
-      const result = await pollFetch(runId, sort.column, sort.direction);
+      const result = await pollFetch(
+        runId,
+        sort.column,
+        sort.direction,
+        pageSpec.page,
+        pageSpec.pageSize,
+      );
       if (cancelled) return;
 
       if (result.progress === null) {
@@ -103,7 +115,7 @@ export function ChannelForm() {
 
       setLost(false);
       setProgress(result.progress);
-      setRows(result.rows);
+      setTable(result.page);
 
       if (isRunning(result.progress.status)) {
         timer = setTimeout(() => void tick(), POLL_INTERVAL_MS);
@@ -116,18 +128,52 @@ export function ChannelForm() {
       cancelled = true;
       if (timer !== null) clearTimeout(timer);
     };
-  }, [runId, sort.column, sort.direction]);
+  }, [runId, sort.column, sort.direction, pageSpec.page, pageSpec.pageSize]);
 
   /**
-   * Порядок задаётся базе, а не наводится по массиву в браузере: на выгрузке
-   * в десятки тысяч строк это разница между отзывчивой таблицей и зависшей.
+   * Порядок и страница задаются базе, а не наводятся по массиву в браузере:
+   * на выгрузке в десятки тысяч строк это разница между отзывчивой таблицей
+   * и зависшей.
    */
-  function handleSort(column: SortColumn): void {
+  function reload(nextSpec: PageSpec, nextSortSpec: SortSpec): void {
     if (runId === null) return;
+    void fetchPage(
+      runId,
+      nextSortSpec.column,
+      nextSortSpec.direction,
+      nextSpec.page,
+      nextSpec.pageSize,
+    ).then((page) => {
+      setTable(page);
+      // База могла загнать номер страницы в границы — держим своё
+      // представление в согласии с её ответом.
+      setPageSpec({ page: page.page, pageSize: nextSpec.pageSize });
+    });
+  }
 
+  function handleSort(column: SortColumn): void {
     const next = nextSort(sort, column);
     setSort(next);
-    void sortRows(runId, next.column, next.direction).then(setRows);
+    // Новый порядок — снова с первой страницы: оставаться на девятой
+    // после смены сортировки бессмысленно, там уже другие строки.
+    const spec: PageSpec = { page: 1, pageSize: pageSpec.pageSize };
+    setPageSpec(spec);
+    reload(spec, next);
+  }
+
+  function handlePage(page: number): void {
+    const spec: PageSpec = { page, pageSize: pageSpec.pageSize };
+    setPageSpec(spec);
+    reload(spec, sort);
+  }
+
+  function handlePageSize(pageSize: PageSize): void {
+    // Держимся за первую видимую строку, иначе при переходе с сотни
+    // на двадцать пять пользователь улетал бы в начало таблицы.
+    const page = pageAfterResize(pageSpec, pageSize, table.total);
+    const spec: PageSpec = { page, pageSize };
+    setPageSpec(spec);
+    reload(spec, sort);
   }
 
   const finished = progress !== null && !isRunning(progress.status);
@@ -227,6 +273,14 @@ export function ChannelForm() {
             />
             Shorts
           </label>
+
+          {/* Счётчик стоит здесь, а не под формой: это главное, за чем
+              следят во время выгрузки, и глазу незачем прыгать вниз. */}
+          {progress !== null && (
+            <div className="ml-auto">
+              <FetchProgress progress={progress} />
+            </div>
+          )}
         </div>
 
         {countError !== undefined && (
@@ -258,18 +312,6 @@ export function ChannelForm() {
         </p>
       )}
 
-      {progress !== null && (
-        <p
-          id="fetch-progress"
-          // Прогресс меняется сам по себе: aria-live даёт скринридеру
-          // прочитать обновление, не уводя фокус.
-          aria-live="polite"
-          className="mt-3 text-sm tabular-nums opacity-80"
-        >
-          {progressLabel(progress)}
-        </p>
-      )}
-
       {finished && progress.errorReason !== null && (
         <p role="alert" className="mt-1 text-sm text-red-600">
           Причина остановки: {progress.errorReason}
@@ -277,7 +319,16 @@ export function ChannelForm() {
       )}
 
       {finished && progress.processed > 0 && (
-        <VideoTable rows={rows} sort={sort} onSort={handleSort} />
+        <>
+          <VideoTable rows={table.rows} sort={sort} onSort={handleSort} />
+          <TablePager
+            spec={pageSpec}
+            pageCount={table.pageCount}
+            total={table.total}
+            onPage={handlePage}
+            onPageSize={handlePageSize}
+          />
+        </>
       )}
     </>
   );
