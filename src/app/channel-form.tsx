@@ -205,11 +205,6 @@ export function ChannelForm() {
               aria-invalid={urlError !== undefined}
               className="w-full rounded border border-black/20 px-3 py-2 dark:border-white/25"
             />
-            {urlError !== undefined && (
-              <p id={ERROR_ID.channelUrl} role="alert" className="mt-1 text-sm text-red-600">
-                {urlError}
-              </p>
-            )}
           </div>
 
           <button
@@ -221,6 +216,15 @@ export function ChannelForm() {
             {working ? "Выгружаю…" : "Начать"}
           </button>
         </div>
+
+        {/* Сообщение стоит под строкой, а не внутри неё: внутри оно растило
+            блок с полем и сдвигало кнопку «Начать» вниз, стоило ошибке
+            появиться. Связь с полем держится на id, а не на вложенности. */}
+        {urlError !== undefined && (
+          <p id={ERROR_ID.channelUrl} role="alert" className="-mt-2 text-sm text-red-600">
+            {urlError}
+          </p>
+        )}
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
           <div className="flex items-center gap-2">

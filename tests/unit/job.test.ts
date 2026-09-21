@@ -69,13 +69,13 @@ describe("текст прогресса", () => {
   it("во время работы показывает собранное и оценку", () => {
     expect(
       progressLabel({ status: "RUNNING", processed: 350, expected: 5000, errorReason: null }),
-    ).toBe("Получено 350 из ~5000…");
+    ).toBe("Получено 350 из ~5000 видео");
   });
 
   it("без оценки показывает только собранное", () => {
     expect(
       progressLabel({ status: "RUNNING", processed: 12, expected: null, errorReason: null }),
-    ).toBe("Получено 12…");
+    ).toBe("Получено 12 видео");
   });
 
   it("прерванная выгрузка сообщает, сколько успели", () => {

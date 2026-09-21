@@ -23,7 +23,7 @@ test.describe("ход выгрузки", () => {
     await expect(progress).toBeVisible();
     // Оценка объёма появляется после первой сохранённой страницы: до неё
     // API ещё не сказал, сколько всего видео на канале.
-    await expect(progress).toHaveText(/Получено \d+ из ~137…/, { timeout: 30_000 });
+    await expect(progress).toHaveText(/Получено \d+ из ~137 видео/, { timeout: 30_000 });
 
     // Пока задание идёт, повторное нажатие невозможно.
     await expect(page.getByRole("button", { name: "Выгружаю…" })).toBeDisabled();

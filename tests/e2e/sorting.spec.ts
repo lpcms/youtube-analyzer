@@ -32,6 +32,26 @@ async function expectFirstCell(page: Page, nth: number, text: string): Promise<v
   });
 }
 
+/**
+ * Столбец отсортирован в нужную сторону, а все «н/д» собраны в конце.
+ *
+ * Проверяется целиком, а не по первой ячейке: пока новый порядок едет
+ * с сервера, в таблице ещё старые строки, и по одной ячейке этого не увидеть.
+ */
+function sortedWithNullsLast(
+  values: ReadonlyArray<number | null>,
+  direction: "ascending" | "descending",
+): boolean {
+  const firstNull = values.indexOf(null);
+  const numbers = (firstNull === -1 ? values : values.slice(0, firstNull)) as number[];
+
+  if (firstNull !== -1 && !values.slice(firstNull).every((v) => v === null)) return false;
+  if (numbers.length === 0) return false;
+
+  const expected = [...numbers].sort((a, b) => (direction === "ascending" ? a - b : b - a));
+  return numbers.every((v, i) => v === expected[i]);
+}
+
 /** Числа колонки как есть, «н/д» отдельным признаком. */
 async function column(page: Page, nth: number): Promise<Array<number | null>> {
   const texts = await page.locator(`tbody tr td:nth-child(${nth})`).allInnerTexts();
@@ -95,20 +115,21 @@ test.describe("сортировка", () => {
   test("строки с «н/д» уходят в конец при любом направлении", async ({ page }) => {
     await fetchChannel(page);
 
-    // В заглушке лайки равны 10 × (номер + 1), у каждого третьего скрыты.
-    const biggest = "1 370";
-    const smallest = "20";
-
-    for (const [expected, first] of [
-      ["descending", biggest],
-      ["ascending", smallest],
-    ] as const) {
+    for (const direction of ["descending", "ascending"] as const) {
       await page.getByRole("button", { name: /Лайки/ }).click();
       await expect(page.getByRole("columnheader", { name: /Лайки/ })).toHaveAttribute(
         "aria-sort",
-        expected,
+        direction,
       );
-      await expectFirstCell(page, 5, first);
+
+      // Ждём не первую ячейку, а весь столбец: до клика таблица отсортирована
+      // по дате, и её первая ячейка может совпасть с ожидаемой по чистой
+      // случайности — тогда проверка прошла бы ещё на старом порядке.
+      await expect
+        .poll(async () => sortedWithNullsLast(await column(page, 5), direction), {
+          timeout: 15_000,
+        })
+        .toBe(true);
 
       const likes = await column(page, 5);
       const firstNull = likes.indexOf(null);
