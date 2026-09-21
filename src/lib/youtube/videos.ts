@@ -101,11 +101,54 @@ export async function resolveKinds(
  */
 export type FetchLimit = number | null;
 
+/** Что выгружать: сколько строк и каких типов. */
+export interface FetchSelection {
+  /** Число либо `null` — «все». */
+  readonly limit: FetchLimit;
+  readonly includeVideos: boolean;
+  readonly includeShorts: boolean;
+}
+
+export interface UploadPage {
+  readonly ids: readonly string[];
+  readonly nextPageToken: string | undefined;
+}
+
+/**
+ * Одна страница плейлиста загрузок — 1 единица квоты за 50 видео.
+ *
+ * Страницами, а не сразу целиком: тип видео становится известен только после
+ * `videos.list`, поэтому отбор по типам идёт по мере обхода, и остановиться
+ * можно, как только набрано нужное количество.
+ */
+export async function fetchUploadPage(
+  uploadsPlaylistId: string,
+  pageToken: string | undefined,
+  maxResults: number,
+): Promise<UploadPage> {
+  const params: Record<string, string> = {
+    part: "contentDetails",
+    playlistId: uploadsPlaylistId,
+    maxResults: String(Math.max(1, Math.min(PAGE_SIZE, maxResults))),
+  };
+  if (pageToken !== undefined) params["pageToken"] = pageToken;
+
+  const page = await callYouTube<PlaylistItemsResponse>("playlistItems.list", params);
+
+  const ids: string[] = [];
+  for (const item of page.items ?? []) {
+    const id = item.contentDetails?.videoId;
+    if (id !== undefined && id !== "") ids.push(id);
+  }
+
+  return { ids, nextPageToken: page.nextPageToken };
+}
+
 /**
  * Идентификаторы видео из плейлиста загрузок.
  *
- * Обход постраничный по `nextPageToken`. Каждая страница — 1 единица квоты
- * за 50 видео, поэтому канал даже на тысячи роликов обходится дёшево.
+ * Обход постраничный по `nextPageToken`. Отбора по типам здесь нет — он
+ * невозможен до `videos.list`; этим занимается fetchChannelVideos.
  */
 export async function fetchUploadIds(
   uploadsPlaylistId: string,
@@ -116,20 +159,9 @@ export async function fetchUploadIds(
 
   while (limit === null || ids.length < limit) {
     const remaining = limit === null ? PAGE_SIZE : Math.min(PAGE_SIZE, limit - ids.length);
+    const page = await fetchUploadPage(uploadsPlaylistId, pageToken, remaining);
 
-    const params: Record<string, string> = {
-      part: "contentDetails",
-      playlistId: uploadsPlaylistId,
-      maxResults: String(remaining),
-    };
-    if (pageToken !== undefined) params["pageToken"] = pageToken;
-
-    const page = await callYouTube<PlaylistItemsResponse>("playlistItems.list", params);
-
-    for (const item of page.items ?? []) {
-      const id = item.contentDetails?.videoId;
-      if (id !== undefined && id !== "") ids.push(id);
-    }
+    ids.push(...page.ids);
 
     // Конец плейлиста. Пустая страница без токена тоже считается концом,
     // иначе обход зациклился бы на канале без видео.
@@ -138,6 +170,32 @@ export async function fetchUploadIds(
   }
 
   return limit === null ? ids : ids.slice(0, limit);
+}
+
+/**
+ * Подходит ли видео под выбранные типы.
+ *
+ * Обе галочки сняты — не подходит ничего: это состояние формы, которое
+ * не должно доходить до выгрузки, и молча выгружать всё было бы хуже.
+ */
+export function matchesSelection(
+  video: Pick<FetchedVideo, "kind">,
+  selection: Pick<FetchSelection, "includeVideos" | "includeShorts">,
+): boolean {
+  return video.kind === "SHORTS" ? selection.includeShorts : selection.includeVideos;
+}
+
+/**
+ * Отбирает из списка не больше `limit` видео выбранных типов.
+ *
+ * Если подходящих меньше — возвращает все имеющиеся, а не добирает чужими.
+ */
+export function selectVideos(
+  videos: readonly FetchedVideo[],
+  selection: FetchSelection,
+): readonly FetchedVideo[] {
+  const matching = videos.filter((v) => matchesSelection(v, selection));
+  return selection.limit === null ? matching : matching.slice(0, selection.limit);
 }
 
 /** Разбивает список на пакеты: `videos.list` принимает до 50 идентификаторов. */
@@ -187,14 +245,47 @@ export async function fetchVideoDetails(
   return result;
 }
 
-/** Видео канала: идентификаторы из плейлиста, затем метрики пакетами по 50. */
+/**
+ * Видео канала выбранных типов, не больше заданного количества.
+ *
+ * Обход идёт страницами: для каждой страницы плейлиста запрашиваются метрики,
+ * подтверждаются типы, отбираются подходящие. Как только набрано нужное
+ * количество — обход прекращается, остаток канала не трогается вовсе.
+ *
+ * Иначе было нельзя: тип видео API не сообщает, он становится известен только
+ * после `videos.list`, поэтому «первые N Shorts» не вычислить заранее.
+ */
 export async function fetchChannelVideos(
   uploadsPlaylistId: string,
-  limit: FetchLimit,
+  selection: FetchSelection,
   options: ConfirmOptions = {},
 ): Promise<readonly FetchedVideo[]> {
-  const ids = await fetchUploadIds(uploadsPlaylistId, limit);
-  if (ids.length === 0) return [];
-  const videos = await fetchVideoDetails(ids);
-  return resolveKinds(videos, options);
+  const { limit, includeVideos, includeShorts } = selection;
+
+  if (!includeVideos && !includeShorts) return [];
+
+  const collected: FetchedVideo[] = [];
+  let pageToken: string | undefined;
+
+  while (limit === null || collected.length < limit) {
+    // Когда выбраны оба типа, подходит каждая строка, и просить у API больше
+    // остатка незачем. При отборе по типу сколько подойдёт — заранее неизвестно,
+    // поэтому берём полную страницу.
+    const bothTypes = includeVideos && includeShorts;
+    const maxResults =
+      limit !== null && bothTypes ? Math.min(PAGE_SIZE, limit - collected.length) : PAGE_SIZE;
+
+    const page = await fetchUploadPage(uploadsPlaylistId, pageToken, maxResults);
+
+    if (page.ids.length > 0) {
+      const details = await fetchVideoDetails(page.ids);
+      const resolved = await resolveKinds(details, options);
+      collected.push(...resolved.filter((v) => matchesSelection(v, selection)));
+    }
+
+    if (page.nextPageToken === undefined) break;
+    pageToken = page.nextPageToken;
+  }
+
+  return limit === null ? collected : collected.slice(0, limit);
 }

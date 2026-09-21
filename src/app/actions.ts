@@ -1,6 +1,7 @@
 "use server";
 
 import { fetchChannel, videoRows, type FetchChannelError } from "@/lib/fetch-channel";
+import type { FetchLimit } from "@/lib/youtube/videos";
 import { emptyFormState, type FormState } from "./form-state";
 
 const MESSAGES: Record<string, string> = {
@@ -24,9 +25,33 @@ function messageFor(error: FetchChannelError): string {
   }
 }
 
+/**
+ * Количество из формы: галочка «все видео» перебивает поле с числом.
+ * Разбор строгий — подробные сообщения об ошибках добавит задача про валидацию.
+ */
+function readLimit(formData: FormData): FetchLimit {
+  if (formData.get("allVideos") !== null) return null;
+
+  const raw = String(formData.get("count") ?? "").trim();
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
 export async function startFetch(_prev: FormState, formData: FormData): Promise<FormState> {
   const url = String(formData.get("channelUrl") ?? "");
-  const result = await fetchChannel(url);
+  const includeVideos = formData.get("includeVideos") !== null;
+  const includeShorts = formData.get("includeShorts") !== null;
+
+  if (!includeVideos && !includeShorts) {
+    return { ...emptyFormState, error: "Выберите хотя бы один тип: Video или Shorts" };
+  }
+
+  const result = await fetchChannel(url, {
+    limit: readLimit(formData),
+    includeVideos,
+    includeShorts,
+  });
 
   if (!result.ok) {
     return { ...emptyFormState, error: messageFor(result.error) };

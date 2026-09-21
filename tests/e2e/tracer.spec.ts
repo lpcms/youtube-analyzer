@@ -12,11 +12,11 @@ import { expect, test, type Page } from "@playwright/test";
 /** Столько видео у канала в заглушке. */
 const TOTAL = 137;
 
-async function fetchChannel(page: Page): Promise<void> {
+async function fetchChannel(page: Page, expected = TOTAL): Promise<void> {
   await page.goto("/");
   await page.getByLabel("Адрес канала").fill("https://www.youtube.com/@e2e");
   await page.getByRole("button", { name: "Начать" }).click();
-  await expect(page.locator("tbody tr")).toHaveCount(TOTAL, { timeout: 60_000 });
+  await expect(page.locator("tbody tr")).toHaveCount(expected, { timeout: 60_000 });
 }
 
 test.describe("выгрузка канала", () => {
@@ -68,6 +68,51 @@ test.describe("выгрузка канала", () => {
     const [opened] = await Promise.all([context.waitForEvent("page"), link.click()]);
     expect(opened).not.toBe(page);
     expect(page.url()).toContain("127.0.0.1");
+  });
+
+  test("обе галочки включены при первой загрузке страницы", async ({ page }) => {
+    await page.goto("/");
+
+    await expect(page.getByRole("checkbox", { name: "Video" })).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Shorts" })).toBeChecked();
+    await expect(page.getByRole("button", { name: "Начать" })).toBeEnabled();
+  });
+
+  test("запрос 5 видео обоих типов даёт таблицу из 5 строк", async ({ page }) => {
+    await page.goto("/");
+
+    await page.getByLabel("Адрес канала").fill("https://www.youtube.com/@e2e");
+    await page.getByRole("checkbox", { name: "Все видео" }).uncheck();
+    await page.getByLabel("Количество").fill("5");
+    await page.getByRole("button", { name: "Начать" }).click();
+
+    await expect(page.locator("tbody tr")).toHaveCount(5, { timeout: 60_000 });
+  });
+
+  test("снятая галочка Video оставляет только Shorts", async ({ page }) => {
+    await page.goto("/");
+
+    await page.getByLabel("Адрес канала").fill("https://www.youtube.com/@e2e");
+    await page.getByRole("checkbox", { name: "Все видео" }).uncheck();
+    await page.getByLabel("Количество").fill("6");
+    await page.getByRole("checkbox", { name: "Video", exact: true }).uncheck();
+    await page.getByRole("button", { name: "Начать" }).click();
+
+    await expect(page.locator("tbody tr")).toHaveCount(6, { timeout: 60_000 });
+    const kinds = await page.locator("tbody tr td:nth-child(2)").allInnerTexts();
+    expect(kinds.every((k) => k.trim() === "Shorts")).toBe(true);
+  });
+
+  test("обе галочки сняты — «Начать» недоступна с пояснением", async ({ page }) => {
+    await page.goto("/");
+
+    await page.getByRole("checkbox", { name: "Video", exact: true }).uncheck();
+    await page.getByRole("checkbox", { name: "Shorts", exact: true }).uncheck();
+
+    await expect(page.getByRole("button", { name: "Начать" })).toBeDisabled();
+    await expect(page.locator("#types-hint")).toHaveText(
+      "Выберите хотя бы один тип: Video или Shorts",
+    );
   });
 
   test("адрес не с youtube.com отклоняется с сообщением", async ({ page }) => {
