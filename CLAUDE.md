@@ -10,8 +10,9 @@
 
 - **Next.js 16** (Turbopack), App Router, серверные действия. React 19, TypeScript 5.9
   в strict-режиме плюс `noUncheckedIndexedAccess`.
-- **Prisma + SQLite** (`better-sqlite3`) — история выгрузок и источник строк
-  для таблицы.
+- **Prisma 7 + SQLite** (`better-sqlite3`) — история выгрузок и источник строк
+  для таблицы. Конфиг — `prisma7.config.ts`, клиент генерируется в
+  `src/generated/prisma` и в репозиторий не коммитится: его создаёт `postinstall`.
 - **YouTube Data API v3** — единственный источник данных.
 - **Tailwind CSS 4** — оформление. **TanStack Table** — сортировка и пагинация.
 - **Vitest 4** + React Testing Library + MSW — модульные и интеграционные тесты.
@@ -30,6 +31,8 @@ npm run format         # Prettier, исправление
 npm test               # Vitest: модульные и интеграционные
 npm run test:coverage  # покрытие
 npm run test:e2e       # Playwright
+npm run db:migrate     # создать и применить миграцию (dev)
+npm run db:deploy      # применить существующие миграции
 npm run verify         # format:check + lint + typecheck + test
 ```
 
