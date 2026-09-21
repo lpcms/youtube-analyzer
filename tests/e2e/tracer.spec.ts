@@ -32,9 +32,10 @@ test.describe("выгрузка канала", () => {
     expect(links).toHaveLength(TOTAL);
     expect(new Set(links).size).toBe(TOTAL);
 
-    // Все девять колонок из ТЗ, в заданном порядке.
+    // Все девять колонок из ТЗ, в заданном порядке. Стрелка направления
+    // сортировки декоративная (aria-hidden) и в название колонки не входит.
     const headers = await page.getByRole("columnheader").allInnerTexts();
-    expect(headers.map((h) => h.trim())).toEqual([
+    expect(headers.map((h) => h.replace(/[↑↓]/g, "").trim())).toEqual([
       "URL",
       "Тип",
       "Длительность",

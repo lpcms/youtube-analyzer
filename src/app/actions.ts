@@ -4,6 +4,7 @@ import { videoRows } from "@/lib/fetch-channel";
 import { jobProgress, startJob, type StartFailure } from "@/lib/fetch-job";
 import { isRunning } from "@/lib/job-status";
 import { readForm, validateRequest } from "@/lib/request-schema";
+import { parseSort } from "@/lib/sorting";
 import { emptyFormState, type FormState, type PollResult } from "./form-state";
 
 /** Отказы, не относящиеся к конкретному полю формы. */
@@ -53,12 +54,32 @@ export async function startFetch(_prev: FormState, formData: FormData): Promise<
  * во время работы таблица всё равно неполная, а запрос к БД на каждый
  * опрос стоил бы дороже прогресса.
  */
-export async function pollFetch(runId: string): Promise<PollResult> {
+export async function pollFetch(
+  runId: string,
+  sortColumn: string | null = null,
+  sortDirection: string | null = null,
+): Promise<PollResult> {
   const progress = await jobProgress(runId);
   if (progress === null) return { progress: null, rows: [] };
 
+  const sort = parseSort(sortColumn, sortDirection);
+
   return {
     progress,
-    rows: isRunning(progress.status) ? [] : await videoRows(runId),
+    rows: isRunning(progress.status) ? [] : await videoRows(runId, { sort }),
   };
+}
+
+/**
+ * Перечитывает строки в другом порядке.
+ *
+ * Отдельным действием, а не повторным опросом: менять порядок можно и когда
+ * выгрузка давно закончилась, и дёргать ради этого прогресс ни к чему.
+ */
+export async function sortRows(
+  runId: string,
+  sortColumn: string,
+  sortDirection: string,
+): Promise<PollResult["rows"]> {
+  return videoRows(runId, { sort: parseSort(sortColumn, sortDirection) });
 }

@@ -1,7 +1,16 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import { VideoTable } from "@/app/video-table";
 import type { VideoRow } from "@/lib/fetch-channel";
+import { DEFAULT_SORT, type SortColumn, type SortSpec } from "@/lib/sorting";
+
+/** Таблица с сортировкой по умолчанию, если тесту не важно иное. */
+function show(rows: readonly VideoRow[], sort: SortSpec = DEFAULT_SORT) {
+  const onSort = vi.fn<(column: SortColumn) => void>();
+  const result = render(<VideoTable rows={rows} sort={sort} onSort={onSort} />);
+  return { ...result, onSort };
+}
 
 const HEADERS = [
   "URL",
@@ -34,14 +43,18 @@ function row(overrides: Partial<VideoRow> = {}): VideoRow {
 
 describe("колонки таблицы", () => {
   it("все девять из ТЗ, в нужном порядке", () => {
-    render(<VideoTable rows={[row()]} />);
+    show([row()]);
 
-    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent?.trim());
+    // Стрелка направления декоративная (aria-hidden), в названии колонки
+    // её быть не должно.
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent?.replace(/[↑↓]/g, "").trim());
     expect(headers).toEqual(HEADERS);
   });
 
   it("значения выводятся в заданных форматах", () => {
-    render(<VideoTable rows={[row()]} />);
+    show([row()]);
 
     expect(screen.getByText("1:02:03")).toBeInTheDocument();
     expect(screen.getByText("2026-09-21 14:21")).toBeInTheDocument();
@@ -50,7 +63,7 @@ describe("колонки таблицы", () => {
   });
 
   it("ноль комментариев остаётся нулём, скрытые лайки — «н/д»", () => {
-    render(<VideoTable rows={[row({ likeCount: null, commentCount: 0 })]} />);
+    show([row({ likeCount: null, commentCount: 0 })]);
 
     const cells = screen.getAllByRole("cell");
     // Порядок ячеек: Тип, Длительность, Просмотры, Лайки, Комментарии, ...
@@ -59,7 +72,7 @@ describe("колонки таблицы", () => {
   });
 
   it("непосчитанная вирусность — «н/д», а не ноль", () => {
-    render(<VideoTable rows={[row({ viralityScore: null })]} />);
+    show([row({ viralityScore: null })]);
 
     expect(screen.getAllByText("н/д")).toHaveLength(1);
   });
@@ -67,7 +80,7 @@ describe("колонки таблицы", () => {
 
 describe("ссылка на видео", () => {
   it("ведёт на страницу просмотра и открывается в новой вкладке", () => {
-    render(<VideoTable rows={[row()]} />);
+    show([row()]);
 
     const link = screen.getByRole("link");
     expect(link).toHaveAttribute("href", "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
@@ -79,7 +92,7 @@ describe("ссылка на видео", () => {
 describe("описание", () => {
   it("выводится как текст: разметка внутри не исполняется", () => {
     const dangerous = '<img src=x onerror="alert(1)"><b>жирный</b>';
-    const { container } = render(<VideoTable rows={[row({ description: dangerous })]} />);
+    const { container } = show([row({ description: dangerous })]);
 
     // Тег остался видимым текстом, а не превратился в элемент.
     expect(screen.getByText(dangerous)).toBeInTheDocument();
@@ -88,7 +101,7 @@ describe("описание", () => {
   });
 
   it("видео без описания даёт пустую ячейку", () => {
-    render(<VideoTable rows={[row({ description: "" })]} />);
+    show([row({ description: "" })]);
 
     const cells = screen.getAllByRole("cell");
     expect(cells[cells.length - 1]).toHaveTextContent("—");
@@ -96,7 +109,7 @@ describe("описание", () => {
 
   it("длинное сокращается, но полный текст доступен", () => {
     const long = "Начало описания. " + "текст ".repeat(60);
-    render(<VideoTable rows={[row({ description: long })]} />);
+    show([row({ description: long })]);
 
     // Сокращённый вид виден сразу.
     expect(screen.getByText(/Начало описания\..*…$/)).toBeInTheDocument();
@@ -109,7 +122,7 @@ describe("описание", () => {
 
 describe("семантика разметки", () => {
   it("заголовки колонок имеют scope", () => {
-    render(<VideoTable rows={[row()]} />);
+    show([row()]);
 
     for (const header of screen.getAllByRole("columnheader")) {
       expect(header).toHaveAttribute("scope", "col");
@@ -117,7 +130,7 @@ describe("семантика разметки", () => {
   });
 
   it("ссылка — опознавательная ячейка строки", () => {
-    render(<VideoTable rows={[row()]} />);
+    show([row()]);
 
     const rowHeader = screen.getByRole("rowheader");
     expect(rowHeader).toHaveAttribute("scope", "row");
@@ -125,7 +138,7 @@ describe("семантика разметки", () => {
   });
 
   it("у таблицы есть подпись для скринридера", () => {
-    render(<VideoTable rows={[row()]} />);
+    show([row()]);
 
     expect(screen.getByRole("table", { name: /Видео канала/ })).toBeInTheDocument();
   });
@@ -133,9 +146,71 @@ describe("семантика разметки", () => {
 
 describe("пустая выгрузка", () => {
   it("объясняет, а не показывает пустую таблицу", () => {
-    render(<VideoTable rows={[]} />);
+    show([]);
 
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.getByText("У этого канала нет видео.")).toBeInTheDocument();
+  });
+});
+
+describe("сортировка в заголовках", () => {
+  const SORTABLE = [
+    "Тип",
+    "Длительность",
+    "Просмотры",
+    "Лайки",
+    "Комментарии",
+    "Вирусность",
+    "Дата",
+  ];
+
+  it("сортируемые колонки — кнопки, URL и Описание — нет", () => {
+    show([row()]);
+
+    for (const label of SORTABLE) {
+      expect(screen.getByRole("button", { name: new RegExp(label) })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("button", { name: /^URL/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Описание/ })).toBeNull();
+  });
+
+  it("направление видно скринридеру через aria-sort", () => {
+    show([row()], { column: "viewCount", direction: "desc" });
+
+    const views = screen.getByRole("columnheader", { name: /Просмотры/ });
+    expect(views).toHaveAttribute("aria-sort", "descending");
+
+    // У остальных сортируемых — «none», у несортируемых атрибута нет вовсе.
+    const likes = screen.getByRole("columnheader", { name: /Лайки/ });
+    expect(likes).toHaveAttribute("aria-sort", "none");
+    expect(screen.getByRole("columnheader", { name: "URL" })).not.toHaveAttribute("aria-sort");
+  });
+
+  it("возрастающий порядок объявляется как ascending", () => {
+    show([row()], { column: "durationSec", direction: "asc" });
+
+    expect(screen.getByRole("columnheader", { name: /Длительность/ })).toHaveAttribute(
+      "aria-sort",
+      "ascending",
+    );
+  });
+
+  it("клик по заголовку сообщает колонку", async () => {
+    const user = userEvent.setup();
+    const { onSort } = show([row()]);
+
+    await user.click(screen.getByRole("button", { name: /Просмотры/ }));
+
+    expect(onSort).toHaveBeenCalledWith("viewCount");
+  });
+
+  it("сортировка доступна с клавиатуры", async () => {
+    const user = userEvent.setup();
+    const { onSort } = show([row()]);
+
+    screen.getByRole("button", { name: /Лайки/ }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(onSort).toHaveBeenCalledWith("likeCount");
   });
 });
