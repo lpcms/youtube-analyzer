@@ -93,19 +93,34 @@ export async function resolveKinds(
   });
 }
 
-/** Идентификаторы видео из плейлиста загрузок, не больше `limit`. */
+/**
+ * Сколько видео выгружать: число либо `null` — «все».
+ *
+ * `null`, а не какое-нибудь большое число: «все» и «много» — разные намерения,
+ * и в журнале выгрузки их надо различать.
+ */
+export type FetchLimit = number | null;
+
+/**
+ * Идентификаторы видео из плейлиста загрузок.
+ *
+ * Обход постраничный по `nextPageToken`. Каждая страница — 1 единица квоты
+ * за 50 видео, поэтому канал даже на тысячи роликов обходится дёшево.
+ */
 export async function fetchUploadIds(
   uploadsPlaylistId: string,
-  limit: number,
+  limit: FetchLimit,
 ): Promise<readonly string[]> {
   const ids: string[] = [];
   let pageToken: string | undefined;
 
-  while (ids.length < limit) {
+  while (limit === null || ids.length < limit) {
+    const remaining = limit === null ? PAGE_SIZE : Math.min(PAGE_SIZE, limit - ids.length);
+
     const params: Record<string, string> = {
       part: "contentDetails",
       playlistId: uploadsPlaylistId,
-      maxResults: String(Math.min(PAGE_SIZE, limit - ids.length)),
+      maxResults: String(remaining),
     };
     if (pageToken !== undefined) params["pageToken"] = pageToken;
 
@@ -116,11 +131,13 @@ export async function fetchUploadIds(
       if (id !== undefined && id !== "") ids.push(id);
     }
 
+    // Конец плейлиста. Пустая страница без токена тоже считается концом,
+    // иначе обход зациклился бы на канале без видео.
     if (page.nextPageToken === undefined) break;
     pageToken = page.nextPageToken;
   }
 
-  return ids.slice(0, limit);
+  return limit === null ? ids : ids.slice(0, limit);
 }
 
 /** Разбивает список на пакеты: `videos.list` принимает до 50 идентификаторов. */
@@ -170,10 +187,10 @@ export async function fetchVideoDetails(
   return result;
 }
 
-/** Последние `limit` видео канала: идентификаторы из плейлиста, затем метрики. */
+/** Видео канала: идентификаторы из плейлиста, затем метрики пакетами по 50. */
 export async function fetchChannelVideos(
   uploadsPlaylistId: string,
-  limit: number,
+  limit: FetchLimit,
   options: ConfirmOptions = {},
 ): Promise<readonly FetchedVideo[]> {
   const ids = await fetchUploadIds(uploadsPlaylistId, limit);

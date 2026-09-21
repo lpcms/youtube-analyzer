@@ -1,22 +1,37 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 /**
  * Сквозной путь: адрес канала → «Начать» → таблица.
  *
  * YouTube подменён локальной заглушкой (tests/e2e/support/mock-youtube.mjs):
- * запрос уходит с сервера Next, из браузера его не перехватить.
+ * запросы уходят с сервера Next, из браузера их не перехватить. Заглушка
+ * отдаёт 137 видео тремя страницами — канал заведомо больше одной страницы,
+ * иначе постраничный обход не проверялся бы вовсе.
  */
-test.describe("трассирующая пуля", () => {
-  test("ввод адреса даёт таблицу из 10 строк", async ({ page }) => {
-    await page.goto("/");
 
-    await page.getByLabel("Адрес канала").fill("https://www.youtube.com/@e2e");
-    await page.getByRole("button", { name: "Начать" }).click();
+/** Столько видео у канала в заглушке. */
+const TOTAL = 137;
+
+async function fetchChannel(page: Page): Promise<void> {
+  await page.goto("/");
+  await page.getByLabel("Адрес канала").fill("https://www.youtube.com/@e2e");
+  await page.getByRole("button", { name: "Начать" }).click();
+  await expect(page.locator("tbody tr")).toHaveCount(TOTAL, { timeout: 60_000 });
+}
+
+test.describe("выгрузка канала", () => {
+  test("канал больше одной страницы выгружается целиком, без дублей", async ({ page }) => {
+    await fetchChannel(page);
 
     const rows = page.locator("tbody tr");
-    await expect(rows).toHaveCount(10);
 
-    // Колонки.
+    // Ни одной повторяющейся ссылки: дублей нет, пропусков тоже.
+    const links = await rows
+      .getByRole("link")
+      .evaluateAll((els) => els.map((e) => e.getAttribute("href")));
+    expect(links).toHaveLength(TOTAL);
+    expect(new Set(links).size).toBe(TOTAL);
+
     await expect(page.getByRole("columnheader", { name: "URL" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Тип" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Просмотры" })).toBeVisible();
@@ -27,10 +42,7 @@ test.describe("трассирующая пуля", () => {
   });
 
   test("в таблице есть строки обоих типов, и тип подтверждён", async ({ page }) => {
-    await page.goto("/");
-    await page.getByLabel("Адрес канала").fill("https://www.youtube.com/@e2e");
-    await page.getByRole("button", { name: "Начать" }).click();
-    await expect(page.locator("tbody tr")).toHaveCount(10);
+    await fetchChannel(page);
 
     const kinds = await page.locator("tbody tr td:nth-child(2)").allInnerTexts();
     expect(kinds.filter((k) => k.trim() === "Video").length).toBeGreaterThan(0);
@@ -40,10 +52,7 @@ test.describe("трассирующая пуля", () => {
   });
 
   test("ссылка на видео открывается в новой вкладке", async ({ page, context }) => {
-    await page.goto("/");
-    await page.getByLabel("Адрес канала").fill("https://www.youtube.com/@e2e");
-    await page.getByRole("button", { name: "Начать" }).click();
-    await expect(page.locator("tbody tr")).toHaveCount(10);
+    await fetchChannel(page);
 
     const link = page.locator("tbody tr").first().getByRole("link");
     await expect(link).toHaveAttribute("target", "_blank");
