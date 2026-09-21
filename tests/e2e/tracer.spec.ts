@@ -164,6 +164,31 @@ test.describe("выгрузка канала", () => {
     expect(expanded.length).toBeGreaterThan(collapsed.length);
   });
 
+  test("колонка Вирусность заполнена для строк с полной статистикой", async ({ page }) => {
+    await fetchChannel(page);
+
+    const scores = (await page.locator("tbody tr td:nth-child(7)").allInnerTexts()).map((t) =>
+      t.trim(),
+    );
+    const likes = (await page.locator("tbody tr td:nth-child(5)").allInnerTexts()).map((t) =>
+      t.trim(),
+    );
+
+    expect(scores).toHaveLength(likes.length);
+
+    for (const [i, score] of scores.entries()) {
+      if (likes[i] === "н/д") {
+        // Скрытая статистика — оценки нет и быть не может.
+        expect(score).toBe("н/д");
+      } else {
+        expect(score).toMatch(/^\d+,\d$/);
+      }
+    }
+
+    // Хоть одно видео посчитано: колонка не сплошь «н/д».
+    expect(scores.some((s) => s !== "н/д")).toBe(true);
+  });
+
   test("адрес не с youtube.com отклоняется с сообщением", async ({ page }) => {
     await page.goto("/");
 
