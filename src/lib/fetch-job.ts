@@ -21,6 +21,7 @@ import { assertTransition, outcomeFor, type FetchStatus, type JobProgress } from
 import { YouTubeApiError } from "@/lib/youtube/api";
 import { resolveChannel } from "@/lib/youtube/resolve-channel";
 import type { ConfirmOptions } from "@/lib/youtube/shorts-check";
+import { computeVirality, type ViralityInput } from "@/lib/virality";
 import {
   streamChannelVideos,
   type FetchLimit,
@@ -176,6 +177,40 @@ async function persistBatch(
   });
 }
 
+/**
+ * Считает вирусность по всей выгрузке и сохраняет её в снимки.
+ *
+ * Один раз по завершении, а не при отрисовке страницы: значение зависит
+ * от медиан по всей выгрузке, поэтому на отдельной строке его не вычислить,
+ * а пересчитывать на каждую страницу таблицы — гонять всю выборку впустую.
+ *
+ * Считается и для прерванной выгрузки: медианы по собранному — всё ещё
+ * осмысленная опора, а «н/д» во всей колонке пользы не несёт.
+ */
+export async function applyVirality(db: PrismaClient, runId: string): Promise<void> {
+  const stats = await db.videoStat.findMany({
+    where: { fetchRunId: runId },
+    include: { video: { select: { kind: true } } },
+  });
+
+  if (stats.length === 0) return;
+
+  const input: ViralityInput[] = stats.map((stat) => ({
+    id: stat.id,
+    kind: stat.video.kind,
+    viewCount: stat.viewCount,
+    likeCount: stat.likeCount,
+    commentCount: stat.commentCount,
+  }));
+
+  const scores = computeVirality(input);
+
+  for (const [statId, score] of scores) {
+    if (score === null) continue;
+    await db.videoStat.update({ where: { id: statId }, data: { viralityScore: score } });
+  }
+}
+
 async function finish(
   db: PrismaClient,
   runId: string,
@@ -233,6 +268,12 @@ export async function runJob(runId: string, options: JobOptions = {}): Promise<v
       failure = "unknown";
       console.error("[выгрузка] непредвиденный сбой", e);
     }
+  }
+
+  // Вирусность считается по всей выгрузке, поэтому только теперь, когда
+  // известны все строки и медианы по ним.
+  if (processed > 0) {
+    await applyVirality(db, runId);
   }
 
   await finish(db, runId, outcomeFor(processed, failure), failure);
