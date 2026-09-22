@@ -11,7 +11,7 @@ import {
   type FetchStatus,
   type JobProgress,
 } from "@/lib/job-status";
-import { resetQuotaCounter } from "@/lib/youtube/api";
+import { NETWORK_ATTEMPTS, resetQuotaCounter } from "@/lib/youtube/api";
 import { testPrisma } from "../db/client";
 import { resetDb } from "../db/reset";
 import { server } from "../msw/server";
@@ -117,7 +117,9 @@ const ids = Array.from({ length: TOTAL }, (_, i) =>
   ("v" + String(i).padStart(10, "0")).slice(0, 11),
 );
 
-function mockChannel(options: { failOnPage?: number; holdFromPage?: number } = {}) {
+function mockChannel(
+  options: { failOnPage?: number; holdFromPage?: number; dropFromPage?: number } = {},
+) {
   let playlistCalls = 0;
   let openGate: (() => void) | null = null;
   // Ворота: страница за ними не отвечает, пока тест их не откроет. Так
@@ -151,6 +153,12 @@ function mockChannel(options: { failOnPage?: number; holdFromPage?: number } = {
           { error: { message: "quota", errors: [{ reason: "quotaExceeded" }] } },
           { status: 403 },
         );
+      }
+
+      // Обрыв связи, а не ответ об ошибке: брошенное в обработчике MSW
+      // превратилось бы в 500, а это другой вид отказа.
+      if (options.dropFromPage !== undefined && playlistCalls > options.dropFromPage) {
+        return HttpResponse.error();
       }
 
       const params = new URL(request.url).searchParams;
@@ -188,6 +196,8 @@ function mockChannel(options: { failOnPage?: number; holdFromPage?: number } = {
   return {
     /** Пропускает придержанную страницу дальше. */
     release: () => openGate?.(),
+    /** Сколько раз спросили страницу списка — с учётом повторов. */
+    pageRequests: () => playlistCalls,
   };
 }
 
@@ -281,6 +291,29 @@ describe("задание выгрузки", () => {
     expect(progress?.processed).toBe(50);
     // Собранное до сбоя не потеряно.
     await expect(testPrisma.video.count()).resolves.toBe(50);
+  });
+
+  it("обрыв связи повторяется ограниченное число раз и даёт частичный результат", async () => {
+    // Первая страница прошла, дальше сеть молчит.
+    const { pageRequests } = mockChannel({ dropFromPage: 1 });
+    const started = await createRun("https://www.youtube.com/@bigchannel", {
+      prisma: testPrisma,
+    });
+    if (!started.ok) throw new Error("не завелось");
+
+    await runJob(started.runId, { prisma: testPrisma });
+
+    const progress = await jobProgress(started.runId, { prisma: testPrisma });
+    expect(progress?.status).toBe("PARTIAL");
+    expect(progress?.errorReason).toBe("network");
+    // Собранное до обрыва осталось в базе.
+    expect(progress?.processed).toBe(50);
+    await expect(testPrisma.video.count()).resolves.toBe(50);
+
+    // Попыток ровно столько, сколько разрешено: удачная первая страница
+    // плюс повторы второй. «Пока не получится» тут не годится — выгрузка
+    // идёт при пользователе.
+    expect(pageRequests()).toBe(1 + NETWORK_ATTEMPTS);
   });
 
   it("сбой на первой же странице даёт FAILED", async () => {

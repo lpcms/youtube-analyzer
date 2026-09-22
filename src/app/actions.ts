@@ -1,25 +1,23 @@
 "use server";
 
+import { failureMessage } from "@/lib/failure-message";
 import { videoPage, type VideoPage } from "@/lib/fetch-channel";
 import { jobProgress, startJob, type StartFailure } from "@/lib/fetch-job";
 import { isRunning } from "@/lib/job-status";
 import { readForm, validateRequest } from "@/lib/request-schema";
 import { parsePage } from "@/lib/pagination";
+import { readServiceHealth } from "@/lib/service-status";
 import { parseSort } from "@/lib/sorting";
 import { emptyFormState, type FormState, type PollResult } from "./form-state";
 
-/** Отказы, не относящиеся к конкретному полю формы. */
-const MESSAGES: Record<string, string> = {
-  "not-found": "Канал не найден",
-  "quota-exceeded": "Суточная квота YouTube API исчерпана — попробуйте завтра",
-  "bad-key": "Ключ YouTube API не принят: проверьте YOUTUBE_API_KEY",
-  network: "YouTube API недоступен",
-  unknown: "Не удалось выгрузить канал",
-};
-
+/**
+ * Отказы, не относящиеся к конкретному полю формы.
+ *
+ * Отказ самого YouTube приходит завёрнутым в kind «api», и говорит о причине
+ * поле reason; остальные отказы называют причину прямо в kind.
+ */
 function messageFor(failure: StartFailure): string {
-  if (failure.kind === "api") return MESSAGES[failure.reason] ?? MESSAGES["unknown"]!;
-  return MESSAGES[failure.kind] ?? MESSAGES["unknown"]!;
+  return failureMessage(failure.kind === "api" ? failure.reason : failure.kind);
 }
 
 /**
@@ -65,12 +63,19 @@ export async function pollFetch(
   pageSize: number | null = null,
 ): Promise<PollResult> {
   const progress = await jobProgress(runId);
-  if (progress === null) return { progress: null, page: EMPTY_PAGE };
+  if (progress === null) {
+    return { progress: null, page: EMPTY_PAGE, health: await readServiceHealth() };
+  }
 
-  if (isRunning(progress.status)) return { progress, page: EMPTY_PAGE };
+  // Последняя выгрузка — это она и есть, поэтому лишнего запроса к базе
+  // ради строки состояния не делаем.
+  const health = await readServiceHealth({ lastRun: progress });
+
+  if (isRunning(progress.status)) return { progress, page: EMPTY_PAGE, health };
 
   return {
     progress,
+    health,
     page: await videoPage(runId, {
       sort: parseSort(sortColumn, sortDirection),
       page: parsePage(page, pageSize),

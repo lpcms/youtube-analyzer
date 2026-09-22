@@ -57,8 +57,48 @@ export const CHANGING_VANISHED = CHANGING["@e2e-gen1"].filter(
 /** Какое состояние меняющегося канала сейчас отдавать. */
 let changingState = "@e2e-gen1";
 
+/**
+ * Канал, на котором кончается квота.
+ *
+ * Первая страница отдаётся, вторая отвечает 403 quotaExceeded — так выглядит
+ * настоящее исчерпание квоты посреди выгрузки. Собранные полсотни строк
+ * обязаны уцелеть.
+ */
+const QUOTA_ID = "UCquotaE2EchannelXYZabc";
+const QUOTA_UPLOADS = "UUquotaE2EchannelXYZabc";
+
+export const QUOTA_FIRST_PAGE = PAGE_SIZE;
+
+const quotaIds = Array.from({ length: 60 }, (_, i) =>
+  `q${String(i).padStart(10, "0")}`.slice(0, 11),
+);
+
+/** Канал, при обращении к которому API не принимает ключ. */
+const BAD_KEY_HANDLE = "@e2e-badkey";
+
+function quotaError() {
+  return {
+    error: {
+      message: "The request cannot be completed because you have exceeded your quota.",
+      errors: [{ reason: "quotaExceeded" }],
+    },
+  };
+}
+
 function channels(params) {
   const handle = params.get("forHandle") ?? "";
+
+  if (handle === "@e2e-quota") {
+    return {
+      items: [
+        {
+          id: QUOTA_ID,
+          snippet: { title: "Канал с кончившейся квотой", customUrl: handle, thumbnails: {} },
+          contentDetails: { relatedPlaylists: { uploads: QUOTA_UPLOADS } },
+        },
+      ],
+    };
+  }
 
   if (handle in CHANGING) {
     // Плейлист загрузок один на оба состояния: канал-то один и тот же,
@@ -96,10 +136,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function playlistItems(params) {
   const playlist = params.get("playlistId") ?? UPLOADS;
-  const all = playlist === CHANGING_UPLOADS ? CHANGING[changingState] : videoIds;
+  const all =
+    playlist === CHANGING_UPLOADS
+      ? CHANGING[changingState]
+      : playlist === QUOTA_UPLOADS
+        ? quotaIds
+        : videoIds;
 
   const maxResults = Number(params.get("maxResults") ?? PAGE_SIZE);
   const offset = Number(params.get("pageToken") ?? "0");
+
+  // Квота кончается ровно на второй странице: первая уже собрана и сохранена.
+  if (playlist === QUOTA_UPLOADS && offset > 0) return { quotaExceeded: true };
   const slice = all.slice(offset, offset + maxResults);
   const next = offset + slice.length;
 
@@ -141,10 +189,30 @@ function changingVideo(id) {
   };
 }
 
+/** Ролик квотного канала: обычное видео, лишь бы отличалось по просмотрам. */
+function quotaVideo(id) {
+  const i = quotaIds.indexOf(id);
+  return {
+    id,
+    snippet: {
+      title: `Видео до квоты ${i}`,
+      description: "",
+      publishedAt: new Date(Date.UTC(2026, 4, 1 + i, 12, 0)).toISOString(),
+    },
+    contentDetails: { duration: "PT10M" },
+    statistics: {
+      viewCount: String(700 * (i + 1)),
+      likeCount: String(7 * (i + 1)),
+      commentCount: "3",
+    },
+  };
+}
+
 function videos(requested) {
   return {
     items: requested.map((id) => {
       if (changingIds.includes(id)) return changingVideo(id);
+      if (quotaIds.includes(id)) return quotaVideo(id);
 
       const i = videoIds.indexOf(id);
       return {
@@ -187,10 +255,27 @@ const server = createServer(async (req, res) => {
 
   let body;
 
-  if (url.pathname.endsWith("/channels")) body = channels(url.searchParams);
-  else if (url.pathname.endsWith("/playlistItems")) {
+  if (url.pathname.endsWith("/channels")) {
+    // Ключ не принят — отказ приходит уже на разрешении канала.
+    if (url.searchParams.get("forHandle") === BAD_KEY_HANDLE) {
+      res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+      res.end(
+        JSON.stringify({
+          error: { message: "API key not valid", errors: [{ reason: "keyInvalid" }] },
+        }),
+      );
+      return;
+    }
+    body = channels(url.searchParams);
+  } else if (url.pathname.endsWith("/playlistItems")) {
     if (PAGE_DELAY_MS > 0) await sleep(PAGE_DELAY_MS);
     body = playlistItems(url.searchParams);
+
+    if (body.quotaExceeded === true) {
+      res.writeHead(403, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(quotaError()));
+      return;
+    }
   } else if (url.pathname.endsWith("/videos"))
     body = videos((url.searchParams.get("id") ?? "").split(","));
   else {
