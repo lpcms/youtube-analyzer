@@ -24,7 +24,57 @@ const videoIds = Array.from({ length: TOTAL }, (_, i) =>
 /** Нечётные — короткие и настоящие Shorts, чётные — длинные видео. */
 const isShort = (i) => i % 2 === 1;
 
-function channels() {
+/**
+ * Меняющийся канал: один и тот же канал YouTube в двух состояниях.
+ *
+ * Состояние выбирается хэндлом в адресе, а не счётчиком обращений: счётчик
+ * пережил бы прогон (заглушка переиспользуется между запусками) и на второй
+ * раз отдавал бы уже не то. С хэндлом тест говорит прямо, какое состояние
+ * канала ему нужно, и не зависит ни от порядка тестов, ни от прошлого прогона.
+ *
+ * Между состояниями два ролика пропали, один появился: 10 → 9.
+ */
+const CHANGING_ID = "UCchangingE2EchannelXYZ";
+const CHANGING_UPLOADS = "UUchangingE2EchannelXYZ";
+
+const changingIds = Array.from({ length: 11 }, (_, i) =>
+  `c${String(i).padStart(10, "0")}`.slice(0, 11),
+);
+
+/** Было: десять роликов. Стало: c8 и c9 пропали, появился c10. */
+const CHANGING = {
+  "@e2e-gen1": changingIds.slice(0, 10),
+  "@e2e-gen2": [...changingIds.slice(0, 8), changingIds[10]],
+};
+
+export const CHANGING_BEFORE = CHANGING["@e2e-gen1"].length;
+export const CHANGING_AFTER = CHANGING["@e2e-gen2"].length;
+/** Сколько роликов пропало между состояниями. */
+export const CHANGING_VANISHED = CHANGING["@e2e-gen1"].filter(
+  (id) => !CHANGING["@e2e-gen2"].includes(id),
+).length;
+
+/** Какое состояние меняющегося канала сейчас отдавать. */
+let changingState = "@e2e-gen1";
+
+function channels(params) {
+  const handle = params.get("forHandle") ?? "";
+
+  if (handle in CHANGING) {
+    // Плейлист загрузок один на оба состояния: канал-то один и тот же,
+    // и в базе он обязан остаться одной записью.
+    changingState = handle;
+    return {
+      items: [
+        {
+          id: CHANGING_ID,
+          snippet: { title: "Меняющийся канал", customUrl: handle, thumbnails: {} },
+          contentDetails: { relatedPlaylists: { uploads: CHANGING_UPLOADS } },
+        },
+      ],
+    };
+  }
+
   return {
     items: [
       {
@@ -45,16 +95,19 @@ const PAGE_DELAY_MS = Number(process.env.MOCK_PAGE_DELAY_MS ?? 0);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function playlistItems(params) {
+  const playlist = params.get("playlistId") ?? UPLOADS;
+  const all = playlist === CHANGING_UPLOADS ? CHANGING[changingState] : videoIds;
+
   const maxResults = Number(params.get("maxResults") ?? PAGE_SIZE);
   const offset = Number(params.get("pageToken") ?? "0");
-  const slice = videoIds.slice(offset, offset + maxResults);
+  const slice = all.slice(offset, offset + maxResults);
   const next = offset + slice.length;
 
   return {
     items: slice.map((id) => ({ contentDetails: { videoId: id } })),
     // Оценка объёма — из неё интерфейс строит «из ~137».
-    pageInfo: { totalResults: TOTAL },
-    ...(next < videoIds.length ? { nextPageToken: String(next) } : {}),
+    pageInfo: { totalResults: all.length },
+    ...(next < all.length ? { nextPageToken: String(next) } : {}),
   };
 }
 
@@ -69,9 +122,30 @@ function describe(i) {
   return "Начало длинного описания. " + "текст ".repeat(40);
 }
 
+/** Ролик меняющегося канала: обычное видео, просмотры разные. */
+function changingVideo(id) {
+  const i = changingIds.indexOf(id);
+  return {
+    id,
+    snippet: {
+      title: `Меняющееся видео ${i}`,
+      description: "",
+      publishedAt: new Date(Date.UTC(2026, 2, 1 + i, 12, 0)).toISOString(),
+    },
+    contentDetails: { duration: "PT10M" },
+    statistics: {
+      viewCount: String(500 * (i + 1)),
+      likeCount: String(5 * (i + 1)),
+      commentCount: "2",
+    },
+  };
+}
+
 function videos(requested) {
   return {
     items: requested.map((id) => {
+      if (changingIds.includes(id)) return changingVideo(id);
+
       const i = videoIds.indexOf(id);
       return {
         id,
@@ -113,7 +187,7 @@ const server = createServer(async (req, res) => {
 
   let body;
 
-  if (url.pathname.endsWith("/channels")) body = channels();
+  if (url.pathname.endsWith("/channels")) body = channels(url.searchParams);
   else if (url.pathname.endsWith("/playlistItems")) {
     if (PAGE_DELAY_MS > 0) await sleep(PAGE_DELAY_MS);
     body = playlistItems(url.searchParams);
