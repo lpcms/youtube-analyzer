@@ -51,6 +51,9 @@ export default defineConfig({
         YOUTUBE_WEB_BASE: `http://127.0.0.1:${mockPort}`,
         YOUTUBE_API_KEY: "e2e-ключ-не-настоящий",
         DATABASE_URL: "file:./db/e2e.db",
+        // Снимки прогона — в свою папку: тест проверяет, что сервис переживает
+        // её удаление, и сносить ради этого настоящий архив пользователя нельзя.
+        HISTORY_DIR: "./db/e2e-history",
       },
     },
   ],

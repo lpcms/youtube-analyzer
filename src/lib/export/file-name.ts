@@ -11,8 +11,24 @@ function dateStamp(date: Date): string {
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
 }
 
-/** Запрещённые в именах файлов Windows символы плюс управляющие. */
-const FORBIDDEN = /[\/:*?"<>|\u0000-\u001f]/g;
+/**
+ * Время в имени файла: часы, минуты и секунды через дефис.
+ *
+ * Двоеточие в именах файлов запрещено, а точка спорила бы с расширением.
+ */
+function timeStamp(date: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${pad(date.getUTCHours())}-${pad(date.getUTCMinutes())}-${pad(date.getUTCSeconds())}`;
+}
+
+/**
+ * Запрещённые в именах файлов Windows символы плюс управляющие.
+ *
+ * Обратная косая здесь не для полноты списка: снимок ложится на диск
+ * настоящим файлом, и название канала с `\` развело бы его по подпапкам,
+ * которых никто не заводил.
+ */
+const FORBIDDEN = /[\\/:*?"<>|\u0000-\u001f]/g;
 
 /** Длиннее незачем: у путей есть предел, а название канала бывает любым. */
 const MAX_TITLE = 60;
@@ -41,6 +57,21 @@ export function safeTitle(title: string): string {
 /** `Канал для E2E-2026-09-21.xlsx` */
 export function exportFileName(channelTitle: string, fetchedAt: Date): string {
   return `${safeTitle(channelTitle)}-${dateStamp(fetchedAt)}.xlsx`;
+}
+
+/**
+ * Имя снимка в `history/`: `Канал-UC…-2026-09-21_14-21-05.xlsx`.
+ *
+ * От имени скачиваемого файла отличается двумя вещами, и обе нужны только
+ * на диске. Идентификатор канала — потому что название неуникально и меняется:
+ * два разных канала «Новости» слиплись бы в папке в одну кучу, а один
+ * переименованный распался бы на два. Время — потому что выгрузок канала
+ * бывает несколько в день, а затирать прежний снимок нельзя: на ряде снимков
+ * стоит сравнение двух дат.
+ */
+export function snapshotFileName(channelTitle: string, channelId: string, fetchedAt: Date): string {
+  const stamp = `${dateStamp(fetchedAt)}_${timeStamp(fetchedAt)}`;
+  return `${safeTitle(channelTitle)}-${channelId}-${stamp}.xlsx`;
 }
 
 /**

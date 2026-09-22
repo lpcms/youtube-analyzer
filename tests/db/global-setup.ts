@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 
 /// Накатывает миграции на тестовую базу один раз за прогон.
@@ -14,6 +14,10 @@ import { createRequire } from "node:module";
 export default function setup(): void {
   // better-sqlite3 не создаёт папку сам.
   mkdirSync("db", { recursive: true });
+
+  // Снимки прошлого прогона — мусор: каждый тест сам кладёт те файлы,
+  // которые проверяет, и накопленное от предыдущих раз только путает.
+  rmSync("db/test-history", { recursive: true, force: true });
 
   // CLI запускается напрямую через Node, а не через npx: на Windows npx —
   // это npx.cmd, а .cmd Node отказывается запускать без shell, тогда как

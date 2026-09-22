@@ -16,6 +16,7 @@
 import "server-only";
 
 import type { PrismaClient } from "@/generated/prisma/client";
+import { saveSnapshot } from "@/lib/export/snapshot";
 import { prisma as defaultPrisma } from "@/lib/prisma";
 import { assertTransition, outcomeFor, type FetchStatus, type JobProgress } from "@/lib/job-status";
 import { YouTubeApiError } from "@/lib/youtube/api";
@@ -354,7 +355,16 @@ export async function runJob(runId: string, options: JobOptions = {}): Promise<v
   // спутали бы с «исчезло».
   const vanished = isCompleteSweep(run, failure) ? await markVanished(db, runId, run.channelId) : 0;
 
-  await finish(db, runId, outcomeFor(processed, failure), failure, vanished);
+  const status = outcomeFor(processed, failure);
+  await finish(db, runId, status, failure, vanished);
+
+  // Снимок кладётся только после успешной выгрузки: у прерванной в файле
+  // оказался бы обрывок канала, неотличимый на диске от полного среза.
+  // Такую таблицу всё ещё можно скачать кнопкой — но осознанно, а не найдя
+  // её потом в архиве и приняв за полную.
+  if (status === "SUCCEEDED") {
+    await saveSnapshot(runId, { prisma: db });
+  }
 }
 
 /**

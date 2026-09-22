@@ -20,6 +20,10 @@ export type ExportResult =
       readonly ok: true;
       readonly fileName: string;
       readonly fetchedAt: Date;
+      // Канал отдаётся вместе с книгой, чтобы снимку в history/ не пришлось
+      // вторым запросом выяснять то, что здесь уже прочитано.
+      readonly channelId: string;
+      readonly channelTitle: string;
       // Именно Uint8Array<ArrayBuffer>: только такой массив Response
       // принимает телом ответа.
       readonly file: Uint8Array<ArrayBuffer>;
@@ -50,6 +54,8 @@ export async function exportRun(
     ok: true,
     fileName: exportFileName(channelTitle, fetchedAt),
     fetchedAt,
+    channelId: run.channelId,
+    channelTitle,
     file: await buildWorkbook(rows, { channelTitle, fetchedAt }),
   };
 }

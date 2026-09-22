@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { contentDisposition, exportFileName, safeTitle } from "@/lib/export/file-name";
+import {
+  contentDisposition,
+  exportFileName,
+  safeTitle,
+  snapshotFileName,
+} from "@/lib/export/file-name";
 
 const FETCHED = new Date(Date.UTC(2026, 8, 21, 14, 21));
+
+const CHANNEL_ID = "UCX6OQ3DkcsbYNE6H8uQQuVA";
 
 describe("имя файла выгрузки", () => {
   it("состоит из названия канала и даты", () => {
@@ -41,6 +48,54 @@ describe("имя файла выгрузки", () => {
 
     expect(name.length).toBeLessThanOrEqual(60 + "-2026-09-21.xlsx".length);
     expect(name.endsWith("-2026-09-21.xlsx")).toBe(true);
+  });
+});
+
+describe("имя снимка в history/", () => {
+  it("состоит из названия канала, его идентификатора и времени выгрузки", () => {
+    expect(snapshotFileName("Канал для E2E", CHANNEL_ID, FETCHED)).toBe(
+      `Канал для E2E-${CHANNEL_ID}-2026-09-21_14-21-00.xlsx`,
+    );
+  });
+
+  it("идентификатор канала есть даже у канала без пригодного названия", () => {
+    // Иначе два канала из одних эмодзи легли бы в папку под одним именем.
+    expect(snapshotFileName("🔥🔥🔥", CHANNEL_ID, FETCHED)).toBe(
+      `🔥🔥🔥-${CHANNEL_ID}-2026-09-21_14-21-00.xlsx`,
+    );
+    expect(snapshotFileName("///", CHANNEL_ID, FETCHED)).toBe(
+      `Канал-${CHANNEL_ID}-2026-09-21_14-21-00.xlsx`,
+    );
+  });
+
+  it("косые в названии не разводят снимок по подпапкам", () => {
+    // Обе косые и двоеточие — разделители пути, а не буквы названия.
+    const name = snapshotFileName("Тех\\Обзор/Звук: сезон", CHANNEL_ID, FETCHED);
+
+    expect(name).toBe(`Тех Обзор Звук сезон-${CHANNEL_ID}-2026-09-21_14-21-00.xlsx`);
+    expect(name).not.toMatch(/[\\/:]/);
+  });
+
+  it("кириллица и пробелы остаются как есть", () => {
+    expect(safeTitle("Канал про звук")).toBe("Канал про звук");
+  });
+
+  it("две выгрузки одного канала в один день различаются временем", () => {
+    const morning = new Date(Date.UTC(2026, 8, 21, 9, 5, 3));
+    const evening = new Date(Date.UTC(2026, 8, 21, 21, 40, 59));
+
+    expect(snapshotFileName("Канал", CHANNEL_ID, morning)).toBe(
+      `Канал-${CHANNEL_ID}-2026-09-21_09-05-03.xlsx`,
+    );
+    expect(snapshotFileName("Канал", CHANNEL_ID, evening)).toBe(
+      `Канал-${CHANNEL_ID}-2026-09-21_21-40-59.xlsx`,
+    );
+  });
+
+  it("время берётся в UTC, а не по часам машины", () => {
+    expect(snapshotFileName("Канал", CHANNEL_ID, new Date(Date.UTC(2026, 0, 1, 0, 0, 0)))).toBe(
+      `Канал-${CHANNEL_ID}-2026-01-01_00-00-00.xlsx`,
+    );
   });
 });
 
