@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { formatCount } from "@/lib/format";
 import {
   MIN_PAGE_SIZE,
@@ -16,6 +17,8 @@ export interface TablePagerProps {
   readonly total: number;
   readonly onPage: (page: number) => void;
   readonly onPageSize: (size: PageSize) => void;
+  /** Кнопки справа в той же строке — например, «Скачать таблицу». */
+  readonly action?: ReactNode;
 }
 
 const BUTTON =
@@ -29,7 +32,14 @@ const BUTTON =
  * Кнопки и выпадающий список — обычные элементы формы, поэтому переключение
  * работает с клавиатуры само, без собственных обработчиков клавиш.
  */
-export function TablePager({ spec, pageCount, total, onPage, onPageSize }: TablePagerProps) {
+export function TablePager({
+  spec,
+  pageCount,
+  total,
+  onPage,
+  onPageSize,
+  action,
+}: TablePagerProps) {
   const { from, to } = rowRange(spec, total);
 
   // Одна страница — листать нечего; выбор размера тоже бессмысленен,
@@ -100,6 +110,8 @@ export function TablePager({ spec, pageCount, total, onPage, onPageSize }: Table
           </select>
         </div>
       )}
+
+      {action !== undefined && <div className="ml-auto">{action}</div>}
     </div>
   );
 }

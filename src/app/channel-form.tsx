@@ -13,6 +13,7 @@ import { isRunning, type JobProgress } from "@/lib/job-status";
 import { FIRST_PAGE, pageAfterResize, type PageSize, type PageSpec } from "@/lib/pagination";
 import { DEFAULT_SORT, nextSort, type SortColumn, type SortSpec } from "@/lib/sorting";
 import { fetchPage, pollFetch, startFetch } from "./actions";
+import { ExportButton } from "./export-button";
 import { FetchProgress } from "./fetch-progress";
 import { DEFAULTS, ERROR_ID, POLL_INTERVAL_MS, emptyFormState, type FormState } from "./form-state";
 import { TablePager } from "./table-pager";
@@ -331,6 +332,9 @@ export function ChannelForm() {
             total={table.total}
             onPage={handlePage}
             onPageSize={handlePageSize}
+            action={
+              runId === null ? null : <ExportButton runId={runId} sort={sort} total={table.total} />
+            }
           />
         </>
       )}
