@@ -11,26 +11,10 @@ import {
   isDescriptionTruncated,
 } from "@/lib/format";
 import { ariaSort, sortArrow, type SortColumn, type SortSpec } from "@/lib/sorting";
+import { COLUMNS } from "@/lib/table-columns";
 import { videoUrl } from "@/lib/youtube/video-url";
 
 const KIND_LABEL = { VIDEO: "Video", SHORTS: "Shorts" } as const;
-
-/** Колонки таблицы в порядке из ТЗ. null в `column` — сортировать нельзя. */
-const COLUMNS: ReadonlyArray<{
-  readonly label: string;
-  readonly column: SortColumn | null;
-  readonly numeric: boolean;
-}> = [
-  { label: "URL", column: null, numeric: false },
-  { label: "Тип", column: "kind", numeric: false },
-  { label: "Длительность", column: "durationSec", numeric: true },
-  { label: "Просмотры", column: "viewCount", numeric: true },
-  { label: "Лайки", column: "likeCount", numeric: true },
-  { label: "Комментарии", column: "commentCount", numeric: true },
-  { label: "Вирусность", column: "viralityScore", numeric: true },
-  { label: "Дата", column: "publishedAt", numeric: false },
-  { label: "Описание", column: null, numeric: false },
-];
 
 /**
  * Вторая полоса прокрутки — над таблицей.
@@ -166,7 +150,7 @@ export function VideoTable({ rows, sort, onSort }: VideoTableProps) {
   }
 
   return (
-    <div className="mt-6">
+    <div className="mt-3">
       {/* Верхняя полоса прокрутки: пустая, но шириной с таблицу. */}
       <div ref={topRef} aria-hidden="true" className="overflow-x-auto overflow-y-hidden">
         <div ref={spacerRef} className="h-3" />
@@ -183,7 +167,7 @@ export function VideoTable({ rows, sort, onSort }: VideoTableProps) {
           <caption className="sr-only">Видео канала с метриками</caption>
           <thead>
             <tr className="bg-black/[0.04] text-left dark:bg-white/[0.06]">
-              {COLUMNS.map(({ label, column, numeric }) => (
+              {COLUMNS.map(({ label, sort: column, numeric }) => (
                 <th
                   key={label}
                   scope="col"
