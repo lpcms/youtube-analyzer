@@ -16,8 +16,10 @@ import type { VideoPage } from "@/lib/fetch-channel";
 import { isRunning, type JobProgress } from "@/lib/job-status";
 import { FIRST_PAGE, pageAfterResize, type PageSize, type PageSpec } from "@/lib/pagination";
 import { DEFAULT_SORT, nextSort, type SortColumn, type SortSpec } from "@/lib/sorting";
-import { fetchPage, listHistory, pollFetch, startFetch } from "./actions";
+import type { RunOption } from "@/lib/compare-runs";
+import { fetchPage, listHistory, listRunsFor, pollFetch, startFetch } from "./actions";
 import { ChannelHistory } from "./channel-history";
+import { ComparePanel } from "./compare-panel";
 import { ExportButton } from "./export-button";
 import { FetchProgress } from "./fetch-progress";
 import { ServiceBanner } from "./service-banner";
@@ -96,6 +98,14 @@ export function ChannelForm({
    */
   const [channels, setChannels] = useState<readonly ChannelSummary[]>(initialChannels);
   const reloadedFor = useRef<string | null>(null);
+
+  /**
+   * Выгрузки открытого канала — из них выбирают две даты для сравнения.
+   *
+   * Отдельным запросом, а не вместе с прогрессом: список меняется только
+   * после новой выгрузки, а опрос идёт раз в семьсот миллисекунд.
+   */
+  const [runs, setRuns] = useState<readonly RunOption[]>([]);
 
   const reloadHistory = useCallback(() => {
     void listHistory().then(setChannels);
@@ -176,6 +186,30 @@ export function ChannelForm({
       if (timer !== null) clearTimeout(timer);
     };
   }, [runId, sort.column, sort.direction, pageSpec.page, pageSpec.pageSize]);
+
+  // Канал открытой таблицы: из него берётся список выгрузок для сравнения.
+  const channelId = progress?.channelId ?? null;
+  const running = progress !== null && isRunning(progress.status);
+
+  /**
+   * Список выгрузок канала — из него выбирают две даты.
+   *
+   * Перечитывается при смене канала и по окончании новой выгрузки: она и есть
+   * новый снимок, которого в списке ещё нет. Во время работы спрашивать
+   * незачем — выгрузка попадёт в список, только когда соберёт хоть строку.
+   */
+  useEffect(() => {
+    if (channelId === null || running) return;
+
+    let cancelled = false;
+    void listRunsFor(channelId).then((fresh) => {
+      if (!cancelled) setRuns(fresh);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [channelId, runId, running]);
 
   /**
    * Порядок и страница задаются базе, а не наводятся по массиву в браузере:
@@ -405,6 +439,13 @@ export function ChannelForm({
           {pager("top")}
           <VideoTable rows={table.rows} sort={sort} onSort={handleSort} />
           {pager("bottom")}
+
+          {/* Панель пересоздаётся, когда список выгрузок меняется: выбранные
+              в ней даты — умолчание от этого списка, и пережившее его
+              сравнение показывало бы вчерашний ответ на сегодняшний вопрос. */}
+          {runs.length > 0 && (
+            <ComparePanel key={`${runs.length}:${runs[0]?.id ?? ""}`} runs={runs} />
+          )}
         </>
       )}
 

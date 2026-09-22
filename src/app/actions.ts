@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { deleteChannel, listChannels, runBelongsTo } from "@/lib/channel-history";
 import type { ChannelSummary } from "@/lib/channel-summary";
+import { compareRuns, listRuns, type CompareResult, type RunOption } from "@/lib/compare-runs";
 import { failureMessage } from "@/lib/failure-message";
 import { videoPage, type VideoPage } from "@/lib/fetch-channel";
 import { jobProgress, startJob, type StartFailure } from "@/lib/fetch-job";
@@ -139,4 +140,30 @@ export async function removeChannel(
   revalidatePath("/");
 
   return { removed, openRunGone };
+}
+
+/**
+ * Выгрузки канала для выбора двух дат.
+ *
+ * Отдельным действием: список нужен только открытому каналу и меняется
+ * лишь после новой выгрузки, а тащить его в каждый ответ на опрос значило бы
+ * платить запросом к базе за каждые семьсот миллисекунд.
+ */
+export async function listRunsFor(channelId: string): Promise<RunOption[]> {
+  return listRuns(channelId);
+}
+
+/**
+ * Сравнение двух выгрузок.
+ *
+ * Ни одного обращения к YouTube: оба снимка лежат в SQLite, а прошлых цифр
+ * у API и нет — он помнит только сегодняшние.
+ */
+export async function fetchComparison(
+  firstRunId: string,
+  secondRunId: string,
+  page: number,
+  pageSize: number,
+): Promise<CompareResult> {
+  return compareRuns(firstRunId, secondRunId, { page: parsePage(page, pageSize) });
 }

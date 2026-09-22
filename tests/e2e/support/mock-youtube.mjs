@@ -170,9 +170,18 @@ function describe(i) {
   return "Начало длинного описания. " + "текст ".repeat(40);
 }
 
-/** Ролик меняющегося канала: обычное видео, просмотры разные. */
+/**
+ * Ролик меняющегося канала.
+ *
+ * Метрики зависят от состояния канала: к gen2 просмотры удваиваются, лайков
+ * становится на три больше, а комментариев столько же. Так у сравнения двух
+ * выгрузок есть что показать — рост, другой рост и честный ноль; на
+ * неподвижных цифрах проверять было бы нечего.
+ */
 function changingVideo(id) {
   const i = changingIds.indexOf(id);
+  const grown = changingState === "@e2e-gen2";
+
   return {
     id,
     snippet: {
@@ -182,8 +191,8 @@ function changingVideo(id) {
     },
     contentDetails: { duration: "PT10M" },
     statistics: {
-      viewCount: String(500 * (i + 1)),
-      likeCount: String(5 * (i + 1)),
+      viewCount: String(500 * (i + 1) * (grown ? 2 : 1)),
+      likeCount: String(5 * (i + 1) + (grown ? 3 : 0)),
       commentCount: "2",
     },
   };
