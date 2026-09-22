@@ -125,6 +125,7 @@ npm run dev
 | `npm run test:watch`    | То же, в режиме наблюдения                                      |
 | `npm run test:coverage` | Тесты с отчётом о покрытии                                      |
 | `npm run test:e2e`      | Playwright: сквозные тесты в браузере                           |
+| `npm run check:key`     | Проверяет, что ключа API нет в собранном клиентском бандле      |
 | `npm run verify`        | `format:check` + `lint` + `typecheck` + `test` — одной командой |
 | `npm run db:migrate`    | Создать и применить миграцию (при изменении схемы Prisma)       |
 | `npm run db:deploy`     | Применить существующие миграции — этим база и создаётся с нуля  |
