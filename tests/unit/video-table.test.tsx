@@ -232,9 +232,10 @@ describe("первая колонка", () => {
     show([row({ title: long })]);
 
     // Обрезается стилями, поэтому полный текст остаётся в атрибуте title.
+    // Ищем по самому значению: в ячейке есть и кнопки копирования,
+    // у них свой title, и «первый попавшийся [title]» указывал бы на них.
     const rowHeader = screen.getByRole("rowheader");
-    const caption = rowHeader.querySelector("[title]");
-    expect(caption).toHaveAttribute("title", long);
+    expect(rowHeader.querySelector(`[title="${long}"]`)).not.toBeNull();
   });
 
   it("название выводится как текст: разметка не исполняется", () => {
@@ -242,5 +243,78 @@ describe("первая колонка", () => {
 
     expect(screen.getByText("<b>жирный</b>")).toBeInTheDocument();
     expect(container.querySelector("b")).toBeNull();
+  });
+});
+
+describe("оформление таблицы", () => {
+  it("значения выровнены по центру, а текст — по левому краю", () => {
+    // Колонку коротких чисел глаз читает сверху вниз, и ровная ось
+    // посередине помогает; ссылка и описание читаются как текст.
+    show([row()]);
+
+    const cells = screen.getAllByRole("cell");
+    const views = cells.find((c) => c.textContent === "1 234 567");
+    const description = cells.find((c) => c.textContent?.includes("Описание"));
+
+    expect(views?.className).toContain("text-center");
+    expect(description?.className).not.toContain("text-center");
+  });
+
+  it("заголовок числовой колонки выровнен так же, как её значения", () => {
+    // Разное выравнивание шапки и ячеек ломает колонку пополам.
+    show([row()]);
+
+    expect(screen.getByRole("columnheader", { name: /Просмотры/ }).className).toContain(
+      "text-center",
+    );
+    expect(screen.getByRole("columnheader", { name: "URL" }).className).not.toContain(
+      "text-center",
+    );
+  });
+
+  it("ячейки отделены друг от друга чертой, кроме последней в строке", () => {
+    show([row()]);
+
+    const cells = screen.getAllByRole("cell");
+    expect(cells[0]?.className).toContain("border-r");
+    // last:border-r-0 — класс есть у всех, а срабатывает у последней.
+    expect(cells.at(-1)?.className).toContain("last:border-r-0");
+  });
+});
+
+describe("копирование из первой колонки", () => {
+  it("даёт скопировать и ссылку, и название", () => {
+    // И то и другое обрезано по ширине: мышью целиком не выделить.
+    show([row()]);
+
+    const rowHeader = screen.getByRole("rowheader");
+    expect(
+      within(rowHeader).getByRole("button", { name: "Скопировать ссылку на видео" }),
+    ).toBeInTheDocument();
+    expect(
+      within(rowHeader).getByRole("button", { name: "Скопировать название видео" }),
+    ).toBeInTheDocument();
+  });
+
+  it("кнопка копирования ссылки кладёт в буфер настоящий адрес видео", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    show([row({ id: "dQw4w9WgXcQ" })]);
+    await userEvent.click(screen.getByRole("button", { name: "Скопировать ссылку на видео" }));
+
+    expect(writeText).toHaveBeenCalledWith("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  });
+
+  it("кнопка копирования названия кладёт в буфер название целиком", async () => {
+    // В ячейке оно обрезано многоточием — копировать надо полное.
+    const long = "Очень длинное название ролика, ".repeat(6);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    show([row({ title: long })]);
+    await userEvent.click(screen.getByRole("button", { name: "Скопировать название видео" }));
+
+    expect(writeText).toHaveBeenCalledWith(long);
   });
 });

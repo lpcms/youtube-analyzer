@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { expect, test, type Page } from "@playwright/test";
+import { COLUMN_LABELS, WORKBOOK_COLUMNS, type ColumnKey } from "../../src/lib/table-columns";
 
 /**
  * Выгрузка таблицы в Excel.
@@ -11,6 +12,19 @@ import { expect, test, type Page } from "@playwright/test";
 
 const TOTAL = 137;
 const PAGE_SIZE = 50;
+
+/**
+ * Номер колонки в книге по её ключу.
+ *
+ * Считается из того же списка, что строит книгу, а не зашит числом:
+ * стоило вставить «Название» второй колонкой — и все зашитые номера
+ * разъехались бы разом.
+ */
+function col(key: ColumnKey): number {
+  const index = WORKBOOK_COLUMNS.findIndex((c) => c.key === key);
+  if (index < 0) throw new Error(`нет колонки ${key}`);
+  return index + 1;
+}
 
 async function fetchChannel(page: Page): Promise<void> {
   await page.goto("/");
@@ -38,7 +52,7 @@ async function download(page: Page): Promise<{ name: string; sheet: ExcelJS.Work
 }
 
 test.describe("выгрузка в Excel", () => {
-  test("скачивается книга со всеми строками и девятью колонками", async ({ page }) => {
+  test("скачивается книга со всеми строками и всеми колонками", async ({ page }) => {
     await fetchChannel(page);
 
     const { name, sheet } = await download(page);
@@ -47,20 +61,28 @@ test.describe("выгрузка в Excel", () => {
     expect(name).toMatch(/^Канал для E2E-\d{4}-\d{2}-\d{2}\.xlsx$/);
 
     const headers = (sheet.getRow(1).values as unknown[]).slice(1);
-    expect(headers).toEqual([
-      "URL",
-      "Тип",
-      "Длительность",
-      "Просмотры",
-      "Лайки",
-      "Комментарии",
-      "Вирусность",
-      "Дата",
-      "Описание",
-    ]);
+    expect(headers).toEqual([...COLUMN_LABELS]);
+    // Девять колонок экрана плюс название видео своей колонкой.
+    expect(headers).toContain("Название");
 
     // На экране была видна полсотни строк, в файле — вся выгрузка.
     expect(sheet.rowCount).toBe(TOTAL + 1);
+  });
+
+  test("название видео в файле совпадает с тем, что видно в таблице", async ({ page }) => {
+    await fetchChannel(page);
+
+    const firstOnScreen = await page
+      .locator("tbody tr")
+      .first()
+      .getByRole("rowheader")
+      .locator("span[title]")
+      .getAttribute("title");
+
+    const { sheet } = await download(page);
+
+    expect(firstOnScreen).not.toBeNull();
+    expect(sheet.getRow(2).getCell(col("title")).value).toBe(firstOnScreen);
   });
 
   test("порядок строк в файле совпадает с выбранной сортировкой", async ({ page }) => {
@@ -74,7 +96,7 @@ test.describe("выгрузка в Excel", () => {
 
     const { sheet } = await download(page);
     const views = Array.from({ length: TOTAL }, (_, i) =>
-      Number(sheet.getRow(i + 2).getCell(4).value),
+      Number(sheet.getRow(i + 2).getCell(col("viewCount")).value),
     );
 
     expect(views).toEqual([...views].sort((a, b) => b - a));
@@ -86,10 +108,10 @@ test.describe("выгрузка в Excel", () => {
     const { sheet } = await download(page);
     const first = sheet.getRow(2);
 
-    const link = first.getCell(1).value as { text: string; hyperlink: string };
+    const link = first.getCell(col("url")).value as { text: string; hyperlink: string };
     expect(link.hyperlink).toMatch(/^https:\/\/www\.youtube\.com\/watch\?v=/);
 
-    expect(typeof first.getCell(4).value).toBe("number");
-    expect(first.getCell(8).value).toBeInstanceOf(Date);
+    expect(typeof first.getCell(col("viewCount")).value).toBe("number");
+    expect(first.getCell(col("publishedAt")).value).toBeInstanceOf(Date);
   });
 });

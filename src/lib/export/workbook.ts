@@ -10,7 +10,7 @@
 import "server-only";
 
 import type { VideoRow } from "@/lib/fetch-channel";
-import { COLUMNS } from "@/lib/table-columns";
+import { WORKBOOK_COLUMNS } from "@/lib/table-columns";
 import { videoUrl } from "@/lib/youtube/video-url";
 
 /** То же, что показывает таблица: «н/д» вместо пустой ячейки. */
@@ -26,6 +26,7 @@ const MAX_CELL_TEXT = 32_767;
 /** Ширины колонок в знаках — на глаз, чтобы файл открывался читаемым. */
 const WIDTH: Record<string, number> = {
   url: 44,
+  title: 46,
   kind: 10,
   durationSec: 13,
   viewCount: 14,
@@ -69,7 +70,7 @@ export async function buildWorkbook(
     views: [{ state: "frozen", ySplit: 1 }],
   });
 
-  sheet.columns = COLUMNS.map((column) => ({
+  sheet.columns = WORKBOOK_COLUMNS.map((column) => ({
     key: column.key,
     header: column.label,
     width: WIDTH[column.key] ?? 14,
@@ -78,10 +79,16 @@ export async function buildWorkbook(
   const header = sheet.getRow(1);
   header.font = { bold: true };
   header.alignment = { vertical: "middle" };
-  sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: COLUMNS.length } };
+  sheet.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: 1, column: WORKBOOK_COLUMNS.length },
+  };
 
   for (const row of rows) {
     const line = sheet.addRow({
+      // Название отдельной колонкой: на экране оно подпись под ссылкой,
+      // а в книге по нему фильтруют и сортируют наравне с остальным.
+      title: row.title,
       kind: KIND_LABEL[row.kind],
       // Длительность — время Excel, то есть доля суток. Так она и сортируется,
       // и суммируется, и показывается как 0:12:05, а не как 725.

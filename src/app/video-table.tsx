@@ -11,8 +11,9 @@ import {
   isDescriptionTruncated,
 } from "@/lib/format";
 import { ariaSort, sortArrow, type SortColumn, type SortSpec } from "@/lib/sorting";
-import { COLUMNS } from "@/lib/table-columns";
+import { SCREEN_COLUMNS } from "@/lib/table-columns";
 import { videoUrl } from "@/lib/youtube/video-url";
+import { CopyButton } from "./copy-button";
 
 const KIND_LABEL = { VIDEO: "Video", SHORTS: "Shorts" } as const;
 
@@ -133,8 +134,20 @@ function DescriptionCell({ text }: { text: string }) {
   );
 }
 
-const CELL = "px-3 py-2.5 align-top";
-const NUMERIC = `${CELL} text-right tabular-nums`;
+/**
+ * Ячейки разделены вертикальной чертой.
+ *
+ * Девять колонок без разделителей сливаются в полосу текста, и взгляд теряет,
+ * к какой колонке относится число. Черта светлая: её задача — вести глаз,
+ * а не расчерчивать таблицу в клетку.
+ */
+const CELL = "border-r border-black/[0.07] px-3 py-2.5 last:border-r-0 dark:border-white/[0.09]";
+
+/** Значение: по центру и моноширинными цифрами — колонка читается сверху вниз. */
+const VALUE = `${CELL} text-center align-middle tabular-nums`;
+
+/** Текст: по левому краю и от верха, иначе рваный край сбивает при чтении. */
+const TEXT = `${CELL} align-top`;
 
 export interface VideoTableProps {
   readonly rows: readonly VideoRow[];
@@ -167,7 +180,7 @@ export function VideoTable({ rows, sort, onSort }: VideoTableProps) {
           <caption className="sr-only">Видео канала с метриками</caption>
           <thead>
             <tr className="bg-black/[0.04] text-left dark:bg-white/[0.06]">
-              {COLUMNS.map(({ label, sort: column, numeric }) => (
+              {SCREEN_COLUMNS.map(({ label, sort: column, align }) => (
                 <th
                   key={label}
                   scope="col"
@@ -175,8 +188,8 @@ export function VideoTable({ rows, sort, onSort }: VideoTableProps) {
                   // колонок атрибута нет вовсе, иначе «none» звучал бы как
                   // «сортировка сброшена», хотя её и не предлагают.
                   aria-sort={column === null ? undefined : ariaSort(sort, column)}
-                  className={`border-b border-black/10 px-3 py-2.5 font-semibold whitespace-nowrap dark:border-white/15 ${
-                    numeric ? "text-right" : ""
+                  className={`border-r border-b border-black/[0.07] border-b-black/15 px-3 py-2.5 font-semibold whitespace-nowrap last:border-r-0 dark:border-white/[0.09] dark:border-b-white/20 ${
+                    align === "center" ? "text-center" : ""
                   }`}
                 >
                   {column === null ? (
@@ -201,38 +214,48 @@ export function VideoTable({ rows, sort, onSort }: VideoTableProps) {
             {rows.map((row) => (
               <tr
                 key={row.id}
-                className="border-b border-black/8 last:border-0 odd:bg-black/[0.015] hover:bg-amber-500/8 dark:border-white/10 dark:odd:bg-white/[0.03]"
+                className="border-b border-black/8 last:border-0 odd:bg-black/[0.022] hover:bg-amber-500/10 dark:border-white/10 dark:odd:bg-white/[0.04]"
               >
                 {/* Ссылка — опознавательная ячейка строки, поэтому th со scope="row". */}
-                <th scope="row" className={`${CELL} max-w-xs font-normal`}>
-                  <a
-                    href={videoUrl(row.id)}
-                    target="_blank"
-                    // noreferrer вместе с noopener: без них открытая вкладка
-                    // получает доступ к window.opener.
-                    rel="noopener noreferrer"
-                    className="block truncate text-blue-700 underline underline-offset-2 dark:text-blue-400"
-                  >
-                    {videoUrl(row.id)}
-                  </a>
+                <th scope="row" className={`${TEXT} max-w-xs font-normal`}>
+                  {/* Кнопка копирования у каждой строки: и ссылка, и название
+                      обрезаны по ширине, мышью их целиком не выделить. */}
+                  <div className="flex items-center gap-1">
+                    <CopyButton
+                      value={videoUrl(row.id)}
+                      kind="link"
+                      label="Скопировать ссылку на видео"
+                    />
+                    <a
+                      href={videoUrl(row.id)}
+                      target="_blank"
+                      // noreferrer вместе с noopener: без них открытая вкладка
+                      // получает доступ к window.opener.
+                      rel="noopener noreferrer"
+                      className="min-w-0 flex-1 truncate text-blue-700 underline underline-offset-2 dark:text-blue-400"
+                    >
+                      {videoUrl(row.id)}
+                    </a>
+                  </div>
                   {/* Название под ссылкой: по одному идентификатору видео
                       не узнать, а открывать вкладку ради этого накладно. */}
-                  <span className="mt-0.5 block truncate text-xs opacity-60" title={row.title}>
-                    {row.title}
-                  </span>
+                  <div className="mt-0.5 flex items-center gap-1">
+                    <CopyButton value={row.title} kind="text" label="Скопировать название видео" />
+                    <span className="min-w-0 flex-1 truncate text-xs opacity-60" title={row.title}>
+                      {row.title}
+                    </span>
+                  </div>
                 </th>
-                <td className={`${CELL} whitespace-nowrap`}>
+                <td className={`${VALUE} whitespace-nowrap`}>
                   <KindCell row={row} />
                 </td>
-                <td className={NUMERIC}>{formatDuration(row.durationSec)}</td>
-                <td className={NUMERIC}>{formatCount(row.viewCount)}</td>
-                <td className={NUMERIC}>{formatCount(row.likeCount)}</td>
-                <td className={NUMERIC}>{formatCount(row.commentCount)}</td>
-                <td className={`${NUMERIC} font-medium`}>{formatVirality(row.viralityScore)}</td>
-                <td className={`${CELL} whitespace-nowrap tabular-nums`}>
-                  {formatDateTime(row.publishedAt)}
-                </td>
-                <td className={`${CELL} min-w-[22rem]`}>
+                <td className={VALUE}>{formatDuration(row.durationSec)}</td>
+                <td className={VALUE}>{formatCount(row.viewCount)}</td>
+                <td className={VALUE}>{formatCount(row.likeCount)}</td>
+                <td className={VALUE}>{formatCount(row.commentCount)}</td>
+                <td className={`${VALUE} font-medium`}>{formatVirality(row.viralityScore)}</td>
+                <td className={`${VALUE} whitespace-nowrap`}>{formatDateTime(row.publishedAt)}</td>
+                <td className={`${TEXT} min-w-[22rem]`}>
                   <DescriptionCell text={row.description} />
                 </td>
               </tr>

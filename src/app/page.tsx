@@ -1,6 +1,7 @@
 import { listChannels } from "@/lib/channel-history";
 import { readServiceHealth } from "@/lib/service-status";
 import { ChannelForm } from "./channel-form";
+import { Logo } from "./logo";
 
 /**
  * Страница отдаёт первый снимок живых данных — состояние сервиса и список
@@ -16,10 +17,17 @@ export default async function Home() {
 
   return (
     <main className="mx-auto max-w-[1600px] px-4 py-8">
-      <h1 className="mb-1 text-2xl font-semibold tracking-tight">Анализатор YouTube-каналов</h1>
-      <p className="mb-4 text-sm opacity-70">
-        Вставьте адрес канала — сервис соберёт таблицу его видео.
-      </p>
+      <div className="mb-4 flex items-center gap-3">
+        <Logo className="size-9 shrink-0" />
+        <div>
+          <h1 className="text-2xl leading-tight font-semibold tracking-tight">
+            Анализатор YouTube-каналов
+          </h1>
+          <p className="text-sm opacity-70">
+            Вставьте адрес канала — сервис соберёт таблицу его видео.
+          </p>
+        </div>
+      </div>
       <ChannelForm health={health} channels={channels} />
     </main>
   );

@@ -279,8 +279,6 @@ export function ChannelForm({
 
   return (
     <>
-      <ServiceBanner health={health} />
-
       <form
         action={action}
         // noValidate: браузер со своей проверкой type=number блокирует
@@ -378,6 +376,11 @@ export function ChannelForm({
             />
             Shorts
           </label>
+
+          {/* Состояние сервиса — здесь же: на него смотрят перед тем, как
+              нажать «Начать», а отдельной полосой над формой оно занимало
+              целую строку экрана. */}
+          <ServiceBanner health={health} />
 
           {/* Счётчик стоит здесь, а не под формой: это главное, за чем
               следят во время выгрузки, и глазу незачем прыгать вниз. */}

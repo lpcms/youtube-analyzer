@@ -51,17 +51,16 @@ export function ServiceBanner({ health }: { health: ServiceHealth }) {
       // role="status" сам по себе даёт вежливое объявление: состояние меняется
       // без участия пользователя, и уводить на него фокус не нужно.
       role="status"
-      className={`mb-6 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-sm ${look.box}`}
+      // Стоит в строке формы, сразу за галочкой Shorts: состояние сервиса
+      // читают перед тем, как нажать «Начать», и отдельная полоса над формой
+      // занимала бы экран ради одной строки.
+      className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-2.5 py-1 text-sm ${look.box}`}
     >
       <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${look.dot}`} />
       <span className="font-semibold">{look.word}.</span>
       <span>{healthMessage(health)}</span>
 
-      <span
-        id="quota-spent"
-        title={QUOTA_HINT}
-        className="ml-auto cursor-help tabular-nums opacity-70"
-      >
+      <span id="quota-spent" title={QUOTA_HINT} className="cursor-help tabular-nums opacity-70">
         {quotaMessage(health)}
       </span>
     </div>

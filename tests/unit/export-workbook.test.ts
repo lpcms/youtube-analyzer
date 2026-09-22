@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { exportRun } from "@/lib/export/export-run";
 import { buildWorkbook } from "@/lib/export/workbook";
 import type { VideoRow } from "@/lib/fetch-channel";
-import { COLUMN_LABELS, COLUMNS, type ColumnKey } from "@/lib/table-columns";
+import { COLUMN_LABELS, COLUMNS, SCREEN_COLUMNS, type ColumnKey } from "@/lib/table-columns";
 import { videoUrl } from "@/lib/youtube/video-url";
 import { testPrisma } from "../db/client";
 import { makeChannel, makeFetchRun, makeVideo, makeVideoStat } from "../db/fixtures";
@@ -74,11 +74,26 @@ describe("книга Excel", () => {
     await expect(read(file)).resolves.toBeDefined();
   });
 
-  it("содержит те же девять колонок, что и таблица на экране", async () => {
+  it("повторяет колонки таблицы и добавляет к ним название видео", async () => {
     const sheet = await read(await buildWorkbook([row()], META));
 
     expect(headers(sheet)).toEqual([...COLUMN_LABELS]);
-    expect(COLUMN_LABELS).toHaveLength(9);
+    expect(COLUMN_LABELS).toHaveLength(10);
+
+    // Единственное расхождение с экраном, и оно намеренное: там название —
+    // подпись под ссылкой в той же ячейке, здесь — своя колонка, по которой
+    // книга фильтруется и сортируется.
+    expect(SCREEN_COLUMNS.map((c) => c.label)).not.toContain("Название");
+    expect(SCREEN_COLUMNS).toHaveLength(9);
+    expect(headers(sheet)).toContain("Название");
+  });
+
+  it("название видео попадает в свою колонку текстом", async () => {
+    const sheet = await read(await buildWorkbook([row({ title: "Как паять <b>феном</b>" })], META));
+
+    // Разметка внутри названия остаётся текстом: Excel её не исполняет,
+    // но и выдумывать из неё ничего не нужно.
+    expect(sheet.getRow(2).getCell(col("title")).value).toBe("Как паять <b>феном</b>");
   });
 
   it("строк ровно столько, сколько в выгрузке, плюс шапка", async () => {
