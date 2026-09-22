@@ -5,6 +5,7 @@ node_modules/
 
 # Сборка Next.js
 .next/
+.next-e2e/
 out/
 build/
 next-env.d.ts

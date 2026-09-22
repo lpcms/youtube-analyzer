@@ -1,6 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = "http://127.0.0.1:3000";
+/**
+ * Свой порт, не 3000.
+ *
+ * На 3000 живёт дев-сервер, запущенный руками. Playwright с
+ * reuseExistingServer подцепился бы к нему — и весь прогон пошёл бы
+ * мимо заглушки: с настоящим ключом, в рабочую базу и с настоящей квотой.
+ * А подготовка тестов чистит историю каналов, то есть чужие данные.
+ * Проверено на себе: один такой прогон стёр выгруженный канал
+ * и наделал восьми FAILED-выгрузок в db/dev.db.
+ */
+const appPort = 3100;
+const baseURL = `http://127.0.0.1:${appPort}`;
 const mockPort = 3101;
 
 export default defineConfig({
@@ -30,7 +41,11 @@ export default defineConfig({
       // его не перехватить, поэтому сервер на время прогона смотрит сюда.
       command: "node tests/e2e/support/mock-youtube.mjs",
       url: `http://127.0.0.1:${mockPort}/channels`,
-      reuseExistingServer: !process.env.CI,
+      // Никогда не переиспользуем чужой сервер: занятый порт должен быть
+      // громким отказом, а не тихим прогоном не пойми против чего.
+      // Заодно снимается старая беда — заглушка, пережившая правку
+      // собственного кода, отдаёт прошлые данные.
+      reuseExistingServer: false,
       timeout: 30_000,
       env: {
         MOCK_YOUTUBE_PORT: String(mockPort),
@@ -40,9 +55,9 @@ export default defineConfig({
       },
     },
     {
-      command: "npm run dev",
+      command: `npm run dev -- --port ${appPort}`,
       url: baseURL,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 120_000,
       env: {
         YOUTUBE_API_BASE: `http://127.0.0.1:${mockPort}`,
@@ -51,6 +66,9 @@ export default defineConfig({
         YOUTUBE_WEB_BASE: `http://127.0.0.1:${mockPort}`,
         YOUTUBE_API_KEY: "e2e-ключ-не-настоящий",
         DATABASE_URL: "file:./db/e2e.db",
+        // Своя папка сборки: замок «второй dev-сервер уже запущен» лежит
+        // внутри неё, и без этого прогон не встанет рядом с рабочим сервером.
+        NEXT_DIST_DIR: ".next-e2e",
         // Снимки прогона — в свою папку: тест проверяет, что сервис переживает
         // её удаление, и сносить ради этого настоящий архив пользователя нельзя.
         HISTORY_DIR: "./db/e2e-history",
