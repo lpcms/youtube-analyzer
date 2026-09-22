@@ -9,6 +9,7 @@ import {
   outcomeFor,
   progressLabel,
   type FetchStatus,
+  type JobProgress,
 } from "@/lib/job-status";
 import { resetQuotaCounter } from "@/lib/youtube/api";
 import { testPrisma } from "../db/client";
@@ -66,22 +67,47 @@ describe("исход выгрузки", () => {
 });
 
 describe("текст прогресса", () => {
+  /** Ничего не исчезло — обычный случай, и лишний счёт в тестах только мешает. */
+  const progress = (over: Partial<JobProgress> & Pick<JobProgress, "status" | "processed">) => ({
+    expected: null,
+    errorReason: null,
+    vanished: 0,
+    ...over,
+  });
+
   it("во время работы показывает собранное и оценку", () => {
-    expect(
-      progressLabel({ status: "RUNNING", processed: 350, expected: 5000, errorReason: null }),
-    ).toBe("Получено 350 из ~5000 видео");
+    expect(progressLabel(progress({ status: "RUNNING", processed: 350, expected: 5000 }))).toBe(
+      "Получено 350 из ~5000 видео",
+    );
   });
 
   it("без оценки показывает только собранное", () => {
-    expect(
-      progressLabel({ status: "RUNNING", processed: 12, expected: null, errorReason: null }),
-    ).toBe("Получено 12 видео");
+    expect(progressLabel(progress({ status: "RUNNING", processed: 12 }))).toBe("Получено 12 видео");
   });
 
   it("прерванная выгрузка сообщает, сколько успели", () => {
     expect(
-      progressLabel({ status: "PARTIAL", processed: 40, expected: 200, errorReason: "quota" }),
+      progressLabel(
+        progress({ status: "PARTIAL", processed: 40, expected: 200, errorReason: "quota" }),
+      ),
     ).toBe("Собрано 40, выгрузка прервана");
+  });
+
+  it("готовая выгрузка без пропаж не говорит о них", () => {
+    expect(progressLabel(progress({ status: "SUCCEEDED", processed: 137 }))).toBe("Готово: 137");
+  });
+
+  it("исчезнувшие с канала названы отдельно", () => {
+    expect(progressLabel(progress({ status: "SUCCEEDED", processed: 135, vanished: 2 }))).toBe(
+      "Готово: 135. Исчезло с канала: 2",
+    );
+  });
+
+  it("одно исчезнувшее видео не ломает согласование", () => {
+    // «Исчезло» безлично: верно и для одного, и для пяти.
+    expect(progressLabel(progress({ status: "SUCCEEDED", processed: 1, vanished: 1 }))).toBe(
+      "Готово: 1. Исчезло с канала: 1",
+    );
   });
 });
 

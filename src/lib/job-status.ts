@@ -70,6 +70,8 @@ export interface JobProgress {
   /** Сколько всего видео на канале, по оценке API. null — пока неизвестно. */
   readonly expected: number | null;
   readonly errorReason: string | null;
+  /** Сколько видео этой выгрузкой помечено исчезнувшими с канала. */
+  readonly vanished: number;
 }
 
 /** Текст прогресса для интерфейса. */
@@ -85,5 +87,10 @@ export function progressLabel(progress: JobProgress): string {
   }
   if (status === "FAILED") return "Выгрузка не удалась";
   if (status === "PARTIAL") return `Собрано ${processed}, выгрузка прервана`;
-  return `Готово: ${processed}`;
+
+  // «Исчезло», а не «исчезли»: безличная форма верна и для одного видео,
+  // и для пяти, а счёт после двоеточия читается сразу.
+  return progress.vanished > 0
+    ? `Готово: ${processed}. Исчезло с канала: ${progress.vanished}`
+    : `Готово: ${processed}`;
 }

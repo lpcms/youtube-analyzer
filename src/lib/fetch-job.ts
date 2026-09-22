@@ -117,30 +117,42 @@ export async function createRun(rawUrl: string, options: JobOptions = {}): Promi
   return { ok: true, runId: run.id, channelId: channel.id };
 }
 
-/** Сохраняет порцию видео и двигает прогресс задания. */
-async function persistBatch(
-  db: PrismaClient,
-  runId: string,
-  channelId: string,
-  videos: readonly FetchedVideo[],
-  totalResults: number | null,
-): Promise<void> {
-  const now = new Date();
+/** Ошибка нарушения уникальности от Prisma. */
+function isDuplicateKey(e: unknown): boolean {
+  return typeof e === "object" && e !== null && "code" in e && e.code === "P2002";
+}
 
-  for (const video of videos) {
+/**
+ * Сохраняет одно видео: есть — обновить, нет — завести.
+ *
+ * upsert в SQLite не атомарен — Prisma сначала ищет строку, потом вставляет.
+ * Две выгрузки одного канала, идущие разом, успевают обе не найти видео
+ * и обе пытаются его вставить; проигравший падает на уникальности
+ * первичного ключа. Дубля при этом не возникает — возникает отказ на ровном
+ * месте, поэтому проигравший просто обновляет то, что вставил победитель.
+ */
+async function saveVideo(
+  db: PrismaClient,
+  channelId: string,
+  video: FetchedVideo,
+  now: Date,
+): Promise<void> {
+  // Неизменное всё же обновляем: автор может переименовать видео
+  // или переписать описание. goneAt сбрасывается: видео вернулось.
+  const update = {
+    title: video.title,
+    description: video.description,
+    durationSec: video.durationSec,
+    kind: video.kind,
+    kindAssumed: video.kindAssumed,
+    lastSeenAt: now,
+    goneAt: null,
+  };
+
+  try {
     await db.video.upsert({
       where: { id: video.id },
-      // Неизменное всё же обновляем: автор может переименовать видео
-      // или переписать описание.
-      update: {
-        title: video.title,
-        description: video.description,
-        durationSec: video.durationSec,
-        kind: video.kind,
-        kindAssumed: video.kindAssumed,
-        lastSeenAt: now,
-        goneAt: null,
-      },
+      update,
       create: {
         id: video.id,
         channelId,
@@ -154,6 +166,67 @@ async function persistBatch(
         lastSeenAt: now,
       },
     });
+  } catch (e) {
+    if (!isDuplicateKey(e)) throw e;
+    await db.video.update({ where: { id: video.id }, data: update });
+  }
+}
+
+/**
+ * Обошла ли выгрузка канал целиком.
+ *
+ * Только у полного обхода «видео не встретилось» значит «видео исчезло».
+ * Выгрузка с ограничением по количеству останавливается на полпути, выгрузка
+ * одного типа не смотрит на второй, а прерванная не дошла до конца — в этих
+ * случаях невстреченное видео просто не запрашивали, и помечать его
+ * исчезнувшим было бы враньём.
+ */
+export function isCompleteSweep(
+  run: {
+    readonly requestedLimit: number | null;
+    readonly includeVideos: boolean;
+    readonly includeShorts: boolean;
+  },
+  failure: string | null,
+): boolean {
+  return failure === null && run.requestedLimit === null && run.includeVideos && run.includeShorts;
+}
+
+/**
+ * Помечает видео канала, которых в этой выгрузке не оказалось.
+ *
+ * Строка не удаляется: у неё есть прошлые снимки метрик, и стирать их значит
+ * терять историю. Дата ставится один раз — та, когда пропажу заметили впервые;
+ * уже помеченные не трогаются, иначе «исчезло» превратилось бы в «последний
+ * раз не видели».
+ *
+ * Условие — отсутствие снимка в этой выгрузке, а не давность lastSeenAt:
+ * так две идущие разом выгрузки одного канала не мешают друг другу.
+ */
+export async function markVanished(
+  db: PrismaClient,
+  runId: string,
+  channelId: string,
+): Promise<number> {
+  const { count } = await db.video.updateMany({
+    where: { channelId, goneAt: null, stats: { none: { fetchRunId: runId } } },
+    data: { goneAt: new Date() },
+  });
+  return count;
+}
+
+/** Сохраняет порцию видео и двигает прогресс задания. */
+async function persistBatch(
+  db: PrismaClient,
+  runId: string,
+  channelId: string,
+  videos: readonly FetchedVideo[],
+  totalResults: number | null,
+): Promise<void> {
+  const now = new Date();
+
+  for (const video of videos) {
+    await saveVideo(db, channelId, video, now);
   }
 
   // Снимки метрик заведомо новые — выгрузка только что создана, значит
@@ -216,6 +289,7 @@ async function finish(
   runId: string,
   status: FetchStatus,
   errorReason: string | null,
+  vanishedCount: number,
 ): Promise<void> {
   const run = await db.fetchRun.findUniqueOrThrow({ where: { id: runId } });
   // Переход проверяется явно: молча перезаписать терминальный статус значило бы
@@ -224,7 +298,7 @@ async function finish(
 
   await db.fetchRun.update({
     where: { id: runId },
-    data: { status, finishedAt: new Date(), errorReason },
+    data: { status, finishedAt: new Date(), errorReason, vanishedCount },
   });
 }
 
@@ -276,7 +350,11 @@ export async function runJob(runId: string, options: JobOptions = {}): Promise<v
     await applyVirality(db, runId);
   }
 
-  await finish(db, runId, outcomeFor(processed, failure), failure);
+  // Исчезнувшие помечаются только после полного обхода: иначе «не встретилось»
+  // спутали бы с «исчезло».
+  const vanished = isCompleteSweep(run, failure) ? await markVanished(db, runId, run.channelId) : 0;
+
+  await finish(db, runId, outcomeFor(processed, failure), failure, vanished);
 }
 
 /**
@@ -311,5 +389,6 @@ export async function jobProgress(
     processed: run.processedCount,
     expected: run.expectedCount,
     errorReason: run.errorReason,
+    vanished: run.vanishedCount,
   };
 }
