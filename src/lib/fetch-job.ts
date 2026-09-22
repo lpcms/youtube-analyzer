@@ -381,7 +381,12 @@ export async function jobProgress(
   options: { prisma?: PrismaClient } = {},
 ): Promise<JobProgress | null> {
   const db = options.prisma ?? defaultPrisma;
-  const run = await db.fetchRun.findUnique({ where: { id: runId } });
+  // Канал берётся тем же запросом: подпись «данные собраны тогда-то»
+  // нужна над каждой таблицей, в том числе открытой из истории.
+  const run = await db.fetchRun.findUnique({
+    where: { id: runId },
+    include: { channel: { select: { id: true, title: true } } },
+  });
   if (run === null) return null;
 
   return {
@@ -390,5 +395,8 @@ export async function jobProgress(
     expected: run.expectedCount,
     errorReason: run.errorReason,
     vanished: run.vanishedCount,
+    channelId: run.channel.id,
+    channelTitle: run.channel.title,
+    fetchedAt: run.finishedAt,
   };
 }

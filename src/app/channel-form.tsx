@@ -9,28 +9,30 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { snapshotNote, type ChannelSummary } from "@/lib/channel-summary";
 import { failureMessage } from "@/lib/failure-message";
 import type { ServiceHealth } from "@/lib/service-health";
 import type { VideoPage } from "@/lib/fetch-channel";
 import { isRunning, type JobProgress } from "@/lib/job-status";
 import { FIRST_PAGE, pageAfterResize, type PageSize, type PageSpec } from "@/lib/pagination";
 import { DEFAULT_SORT, nextSort, type SortColumn, type SortSpec } from "@/lib/sorting";
-import { fetchPage, pollFetch, startFetch } from "./actions";
+import { fetchPage, listHistory, pollFetch, startFetch } from "./actions";
+import { ChannelHistory } from "./channel-history";
 import { ExportButton } from "./export-button";
 import { FetchProgress } from "./fetch-progress";
 import { ServiceBanner } from "./service-banner";
-import { DEFAULTS, ERROR_ID, POLL_INTERVAL_MS, emptyFormState, type FormState } from "./form-state";
+import {
+  DEFAULTS,
+  ERROR_ID,
+  POLL_INTERVAL_MS,
+  RUN_PARAM,
+  emptyFormState,
+  type FormState,
+} from "./form-state";
 import { TablePager, type PagerPlace } from "./table-pager";
 import { VideoTable } from "./video-table";
 
 const EMPTY_PAGE: VideoPage = { rows: [], total: 0, page: 1, pageCount: 1 };
-
-/**
- * Адрес страницы помнит идентификатор задания, поэтому перезагрузка во время
- * выгрузки её не теряет: опрос продолжится с того же места. Само задание
- * крутится на сервере и от закрытия вкладки не зависит.
- */
-const RUN_PARAM = "run";
 
 /**
  * Идентификатор задания из адреса страницы.
@@ -61,9 +63,14 @@ function rememberRunId(runId: string | null): void {
 export interface ChannelFormProps {
   /** Состояние сервиса на момент открытия страницы — дальше его обновляет опрос. */
   readonly health: ServiceHealth;
+  /** Первый список каналов с сервера — дальше форма перечитывает его сама. */
+  readonly channels: readonly ChannelSummary[];
 }
 
-export function ChannelForm({ health: initialHealth }: ChannelFormProps) {
+export function ChannelForm({
+  health: initialHealth,
+  channels: initialChannels,
+}: ChannelFormProps) {
   const [state, action, submitting] = useActionState<FormState, FormData>(
     startFetch,
     emptyFormState,
@@ -78,6 +85,21 @@ export function ChannelForm({ health: initialHealth }: ChannelFormProps) {
   // Состояние сервиса приходит с сервера при открытии страницы, а дальше
   // приезжает с каждым ответом на опрос: иначе строка врала бы до перезагрузки.
   const [health, setHealth] = useState<ServiceHealth>(initialHealth);
+
+  /**
+   * История живёт здесь же, а не отдельным серверным компонентом.
+   *
+   * Её надо перечитывать после выгрузки и после удаления, а router.refresh()
+   * для этого не годится: он пересобирает весь сегмент, и открытая таблица
+   * перемонтируется — сортировка и размер страницы сбрасываются на умолчания
+   * прямо под руками пользователя. Точечное действие меняет ровно то, что должно.
+   */
+  const [channels, setChannels] = useState<readonly ChannelSummary[]>(initialChannels);
+  const reloadedFor = useRef<string | null>(null);
+
+  const reloadHistory = useCallback(() => {
+    void listHistory().then(setChannels);
+  }, []);
 
   // Задание берётся из ответа действия, а после перезагрузки — из адреса.
   // Это вычисляемое значение, а не состояние: дублировать его в useState
@@ -132,6 +154,15 @@ export function ChannelForm({ health: initialHealth }: ChannelFormProps) {
       setLost(false);
       setProgress(result.progress);
       setTable(result.page);
+
+      // Один раз на выгрузку: перечитывать историю на каждый повторный опрос
+      // той же законченной выгрузки незачем.
+      if (!isRunning(result.progress.status) && reloadedFor.current !== runId) {
+        reloadedFor.current = runId;
+        void listHistory().then((fresh) => {
+          if (!cancelled) setChannels(fresh);
+        });
+      }
 
       if (isRunning(result.progress.status)) {
         timer = setTimeout(() => void tick(), POLL_INTERVAL_MS);
@@ -366,11 +397,18 @@ export function ChannelForm({ health: initialHealth }: ChannelFormProps) {
               строками длиннее экрана, и после просмотра низа возвращаться
               наверх за кнопкой «Вперёд» — лишняя работа. Обе панели живые
               и читают одно состояние, поэтому расходиться им не с чего. */}
+          {/* Таблица из истории ничем не отличается на вид от только что
+              выгруженной — дата снимка снимает этот вопрос. */}
+          <p id="snapshot-note" className="mt-6 text-sm opacity-70">
+            {snapshotNote(progress.channelTitle, progress.fetchedAt)}
+          </p>
           {pager("top")}
           <VideoTable rows={table.rows} sort={sort} onSort={handleSort} />
           {pager("bottom")}
         </>
       )}
+
+      <ChannelHistory channels={channels} onChanged={reloadHistory} />
     </>
   );
 }

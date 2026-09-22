@@ -44,6 +44,18 @@ export const DEFAULTS: FormDefaults = {
   count: 50,
 };
 
+/**
+ * Адрес страницы помнит идентификатор выгрузки: перезагрузка её не теряет,
+ * а история открывает канал обычной ссылкой на его последнюю выгрузку.
+ */
+export const RUN_PARAM = "run";
+
+/** Какая выгрузка открыта сейчас. На сервере адреса нет — там null. */
+export function openRunId(): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get(RUN_PARAM);
+}
+
 /** Как часто интерфейс спрашивает о прогрессе. */
 export const POLL_INTERVAL_MS = 700;
 

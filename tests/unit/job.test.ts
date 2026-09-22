@@ -68,10 +68,15 @@ describe("исход выгрузки", () => {
 
 describe("текст прогресса", () => {
   /** Ничего не исчезло — обычный случай, и лишний счёт в тестах только мешает. */
-  const progress = (over: Partial<JobProgress> & Pick<JobProgress, "status" | "processed">) => ({
+  const progress = (
+    over: Partial<JobProgress> & Pick<JobProgress, "status" | "processed">,
+  ): JobProgress => ({
     expected: null,
     errorReason: null,
     vanished: 0,
+    channelId: CHANNEL_ID,
+    channelTitle: "Канал",
+    fetchedAt: null,
     ...over,
   });
 

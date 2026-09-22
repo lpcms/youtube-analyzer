@@ -72,6 +72,11 @@ export interface JobProgress {
   readonly errorReason: string | null;
   /** Сколько видео этой выгрузкой помечено исчезнувшими с канала. */
   readonly vanished: number;
+  /** Чей это снимок — нужно подписи над таблицей. */
+  readonly channelId: string;
+  readonly channelTitle: string;
+  /** Когда выгрузка закончилась; null — ещё идёт. */
+  readonly fetchedAt: Date | null;
 }
 
 /** Текст прогресса для интерфейса. */

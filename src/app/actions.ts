@@ -1,5 +1,8 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+import { deleteChannel, listChannels, runBelongsTo } from "@/lib/channel-history";
+import type { ChannelSummary } from "@/lib/channel-summary";
 import { failureMessage } from "@/lib/failure-message";
 import { videoPage, type VideoPage } from "@/lib/fetch-channel";
 import { jobProgress, startJob, type StartFailure } from "@/lib/fetch-job";
@@ -100,4 +103,40 @@ export async function fetchPage(
     sort: parseSort(sortColumn, sortDirection),
     page: parsePage(page, pageSize),
   });
+}
+
+/**
+ * Список каналов для перерисовки истории без перезагрузки страницы.
+ *
+ * Отдельным действием, а не router.refresh(): пересборка всего сегмента
+ * задевает открытую таблицу — форма перемонтируется, сортировка и размер
+ * страницы сбрасываются. Здесь меняется ровно то, что должно.
+ */
+export async function listHistory(): Promise<ChannelSummary[]> {
+  return listChannels();
+}
+
+/**
+ * Убирает канал из истории вместе с его видео и снимками.
+ *
+ * Подтверждение спрашивает интерфейс, а не это действие: действие вызывается
+ * по сети и обязано делать ровно то, о чём его попросили. Повторный вызов
+ * для уже удалённого канала не ошибка — это обычная вторая вкладка.
+ *
+ * openRunId — выгрузка, открытая у пользователя на экране. Если она
+ * принадлежала удаляемому каналу, интерфейсу придётся увести страницу
+ * с неё; если чужому — таблицу трогать незачем.
+ */
+export async function removeChannel(
+  channelId: string,
+  openRunId: string | null = null,
+): Promise<{ removed: boolean; openRunGone: boolean }> {
+  const openRunGone = openRunId === null ? false : await runBelongsTo(openRunId, channelId);
+  const removed = await deleteChannel(channelId);
+
+  // Список каналов собирается на сервере, поэтому его нужно пересобрать:
+  // иначе удалённый канал остался бы на странице до перезагрузки.
+  revalidatePath("/");
+
+  return { removed, openRunGone };
 }

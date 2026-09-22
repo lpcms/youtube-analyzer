@@ -73,7 +73,7 @@ export function TablePager({
     <div
       data-place={place}
       className={`flex flex-wrap items-center gap-x-6 gap-y-3 text-sm ${
-        place === "top" ? "mt-6" : "mt-4"
+        place === "top" ? "mt-3" : "mt-4"
       }`}
     >
       <p id={rowCountId} className="tabular-nums opacity-80">
