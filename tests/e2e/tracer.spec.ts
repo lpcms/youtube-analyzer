@@ -24,7 +24,9 @@ async function fetchChannel(page: Page, expected = PAGE_SIZE): Promise<void> {
 
 /** Показывает всю выгрузку на одной странице — там, где так удобнее проверять. */
 async function showAll(page: Page): Promise<void> {
-  await page.getByLabel("Строк на странице").selectOption("100");
+  // Панель листания стоит дважды, над таблицей и под ней: обращаемся
+  // к верхней по её id, иначе селектор поймал бы обе.
+  await page.locator("#pageSize-top").selectOption("100");
   await expect(page.locator("tbody tr")).toHaveCount(100, { timeout: 30_000 });
 }
 
@@ -36,7 +38,7 @@ test.describe("выгрузка канала", () => {
 
     // Ни одной повторяющейся ссылки: дублей нет, пропусков тоже.
     // Число строк выгрузки сообщает подпись под таблицей.
-    await expect(page.locator("#row-count")).toHaveText(new RegExp(String(TOTAL)));
+    await expect(page.locator("#row-count-top")).toHaveText(new RegExp(String(TOTAL)));
 
     const links = await rows
       .getByRole("link")

@@ -11,6 +11,12 @@ import {
   type PageSpec,
 } from "@/lib/pagination";
 
+/**
+ * Где стоит панель. Их две — над таблицей и под ней, чтобы листать и скачивать
+ * можно было, не уезжая в другой конец длинной страницы.
+ */
+export type PagerPlace = "top" | "bottom";
+
 export interface TablePagerProps {
   readonly spec: PageSpec;
   readonly pageCount: number;
@@ -19,6 +25,7 @@ export interface TablePagerProps {
   readonly onPageSize: (size: PageSize) => void;
   /** Кнопки справа в той же строке — например, «Скачать таблицу». */
   readonly action?: ReactNode;
+  readonly place: PagerPlace;
 }
 
 const BUTTON =
@@ -26,11 +33,22 @@ const BUTTON =
   "enabled:hover:bg-black/5 disabled:opacity-40 " +
   "dark:border-white/25 dark:enabled:hover:bg-white/10";
 
+const PLACE_LABEL: Record<PagerPlace, string> = { top: "сверху", bottom: "снизу" };
+
 /**
  * Переключатель страниц.
  *
  * Кнопки и выпадающий список — обычные элементы формы, поэтому переключение
  * работает с клавиатуры само, без собственных обработчиков клавиш.
+ *
+ * Панель выводится дважды, поэтому всё, что должно быть на странице
+ * в единственном экземпляре, различается по `place`:
+ *
+ * - `id` у счётчика строк и у выбора размера: два одинаковых `id` — невалидная
+ *   разметка, и связь `label` с полем перестаёт быть однозначной;
+ * - имя у `nav`: в списке ориентиров скринридера две «Страницы таблицы»
+ *   неразличимы, и непонятно, куда ведёт каждая;
+ * - `aria-live` только у верхней: иначе смену страницы объявят дважды подряд.
  */
 export function TablePager({
   spec,
@@ -39,6 +57,7 @@ export function TablePager({
   onPage,
   onPageSize,
   action,
+  place,
 }: TablePagerProps) {
   const { from, to } = rowRange(spec, total);
 
@@ -47,9 +66,17 @@ export function TablePager({
   const showPager = pageCount > 1;
   const showSize = total > MIN_PAGE_SIZE;
 
+  const rowCountId = `row-count-${place}`;
+  const sizeId = `pageSize-${place}`;
+
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
-      <p id="row-count" className="tabular-nums opacity-80">
+    <div
+      data-place={place}
+      className={`flex flex-wrap items-center gap-x-6 gap-y-3 text-sm ${
+        place === "top" ? "mt-6" : "mt-4"
+      }`}
+    >
+      <p id={rowCountId} className="tabular-nums opacity-80">
         {total === 0 ? (
           "Нет строк"
         ) : (
@@ -64,7 +91,10 @@ export function TablePager({
       </p>
 
       {showPager && (
-        <nav aria-label="Страницы таблицы" className="flex items-center gap-2">
+        <nav
+          aria-label={`Страницы таблицы, ${PLACE_LABEL[place]}`}
+          className="flex items-center gap-2"
+        >
           <button
             type="button"
             onClick={() => onPage(spec.page - 1)}
@@ -74,7 +104,7 @@ export function TablePager({
             ← Назад
           </button>
 
-          <span aria-live="polite" className="tabular-nums">
+          <span aria-live={place === "top" ? "polite" : "off"} className="tabular-nums">
             Страница <span className="font-medium">{spec.page}</span> из{" "}
             <span className="font-medium">{pageCount}</span>
           </span>
@@ -92,9 +122,9 @@ export function TablePager({
 
       {showSize && (
         <div className="flex items-center gap-2">
-          <label htmlFor="pageSize">Строк на странице</label>
+          <label htmlFor={sizeId}>Строк на странице</label>
           <select
-            id="pageSize"
+            id={sizeId}
             value={spec.pageSize}
             onChange={(e) => {
               const next = Number(e.target.value);

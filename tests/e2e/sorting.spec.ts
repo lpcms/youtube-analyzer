@@ -16,7 +16,9 @@ async function fetchChannel(page: Page): Promise<void> {
   await expect(page.locator("tbody tr")).toHaveCount(50, { timeout: 60_000 });
   // Сортировка проверяется на всей выгрузке, поэтому убираем разбивку,
   // насколько позволяет самый крупный размер страницы.
-  await page.getByLabel("Строк на странице").selectOption("100");
+  // Панель листания стоит дважды, над таблицей и под ней: обращаемся
+  // к верхней по её id, иначе селектор поймал бы обе.
+  await page.locator("#pageSize-top").selectOption("100");
   await expect(page.locator("tbody tr")).toHaveCount(100, { timeout: 30_000 });
 }
 

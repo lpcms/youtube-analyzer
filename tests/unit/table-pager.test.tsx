@@ -4,11 +4,22 @@ import { describe, expect, it, vi } from "vitest";
 import { TablePager } from "@/app/table-pager";
 import type { PageSize, PageSpec } from "@/lib/pagination";
 
-function pager(spec: PageSpec, pageCount: number, total: number) {
+/**
+ * Панель выводится дважды — над таблицей и под ней. Модульные тесты
+ * показывают по одной, нижней; про различия между местами — отдельный describe.
+ */
+
+function pager(
+  spec: PageSpec,
+  pageCount: number,
+  total: number,
+  place: "top" | "bottom" = "bottom",
+) {
   const onPage = vi.fn<(page: number) => void>();
   const onPageSize = vi.fn<(size: PageSize) => void>();
   render(
     <TablePager
+      place={place}
       spec={spec}
       pageCount={pageCount}
       total={total}
@@ -38,7 +49,7 @@ describe("переключение страниц", () => {
   it("номер текущей страницы и общее число видны", () => {
     pager({ page: 2, pageSize: 50 }, 3, 137);
 
-    const nav = screen.getByRole("navigation", { name: "Страницы таблицы" });
+    const nav = screen.getByRole("navigation", { name: "Страницы таблицы, снизу" });
     expect(nav).toHaveTextContent("Страница 2 из 3");
   });
 
@@ -56,6 +67,7 @@ describe("переключение страниц", () => {
   it("на первой странице «Назад» недоступна, на последней — «Вперёд»", () => {
     const { unmount } = render(
       <TablePager
+        place="bottom"
         spec={{ page: 1, pageSize: 50 }}
         pageCount={3}
         total={137}
@@ -112,5 +124,77 @@ describe("размер страницы", () => {
     pager({ page: 1, pageSize: 50 }, 1, 12);
 
     expect(screen.queryByLabelText("Строк на странице")).toBeNull();
+  });
+});
+
+describe("две панели на странице", () => {
+  /**
+   * Панель стоит и над таблицей, и под ней. Всё, что на странице должно быть
+   * в единственном экземпляре, обязано различаться — иначе разметка невалидна,
+   * а скринридер не отличит одну панель от другой.
+   */
+  function bothPlaces(): void {
+    render(
+      <>
+        <TablePager
+          place="top"
+          spec={{ page: 2, pageSize: 50 }}
+          pageCount={3}
+          total={137}
+          onPage={vi.fn()}
+          onPageSize={vi.fn()}
+        />
+        <TablePager
+          place="bottom"
+          spec={{ page: 2, pageSize: 50 }}
+          pageCount={3}
+          total={137}
+          onPage={vi.fn()}
+          onPageSize={vi.fn()}
+        />
+      </>,
+    );
+  }
+
+  it("счётчик строк и выбор размера не делят один id", () => {
+    bothPlaces();
+
+    const ids = screen.getAllByText(/Строки/).map((el) => el.id);
+    expect(ids).toEqual(["row-count-top", "row-count-bottom"]);
+
+    const selects = screen.getAllByLabelText("Строк на странице").map((el) => el.id);
+    expect(selects).toEqual(["pageSize-top", "pageSize-bottom"]);
+    expect(new Set(selects).size).toBe(2);
+  });
+
+  it("каждая навигация названа своим местом", () => {
+    bothPlaces();
+
+    expect(
+      screen.getByRole("navigation", { name: "Страницы таблицы, сверху" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Страницы таблицы, снизу" })).toBeInTheDocument();
+  });
+
+  it("смену страницы объявляет только верхняя панель", () => {
+    bothPlaces();
+
+    // Иначе скринридер произнесёт «Страница 2 из 3» дважды подряд.
+    const live = screen
+      .getAllByText(/Страница/)
+      .map((el) => el.getAttribute("aria-live"))
+      .filter((value) => value === "polite");
+
+    expect(live).toHaveLength(1);
+  });
+
+  it("обе панели показывают одно и то же", () => {
+    bothPlaces();
+
+    const [top, bottom] = screen.getAllByText(/Строки/);
+    expect(top?.textContent).toBe(bottom?.textContent);
+
+    const pages = screen.getAllByText(/Страница/).map((el) => el.textContent);
+    expect(pages[0]).toBe(pages[1]);
   });
 });

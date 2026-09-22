@@ -23,7 +23,8 @@ async function fetchChannel(page: Page): Promise<void> {
 async function download(page: Page): Promise<{ name: string; sheet: ExcelJS.Worksheet }> {
   const [file] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("link", { name: "Скачать таблицу" }).click(),
+    // Кнопка есть и над таблицей, и под ней — обе ведут в одно место.
+    page.getByRole("link", { name: "Скачать таблицу" }).first().click(),
   ]);
 
   const path = await file.path();

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type ReactElement,
   useActionState,
   useCallback,
   useEffect,
@@ -16,7 +17,7 @@ import { fetchPage, pollFetch, startFetch } from "./actions";
 import { ExportButton } from "./export-button";
 import { FetchProgress } from "./fetch-progress";
 import { DEFAULTS, ERROR_ID, POLL_INTERVAL_MS, emptyFormState, type FormState } from "./form-state";
-import { TablePager } from "./table-pager";
+import { TablePager, type PagerPlace } from "./table-pager";
 import { VideoTable } from "./video-table";
 
 const EMPTY_PAGE: VideoPage = { rows: [], total: 0, page: 1, pageCount: 1 };
@@ -179,6 +180,24 @@ export function ChannelForm() {
 
   const finished = progress !== null && !isRunning(progress.status);
 
+  // Панель описана один раз и выводится дважды: место разное, состояние
+  // и обработчики — одни и те же.
+  function pager(place: PagerPlace): ReactElement {
+    return (
+      <TablePager
+        place={place}
+        spec={pageSpec}
+        pageCount={table.pageCount}
+        total={table.total}
+        onPage={handlePage}
+        onPageSize={handlePageSize}
+        action={
+          runId === null ? null : <ExportButton runId={runId} sort={sort} total={table.total} />
+        }
+      />
+    );
+  }
+
   return (
     <>
       <form
@@ -325,17 +344,13 @@ export function ChannelForm() {
 
       {finished && progress.processed > 0 && (
         <>
+          {/* Панель повторяется над таблицей и под ней: страница со ста
+              строками длиннее экрана, и после просмотра низа возвращаться
+              наверх за кнопкой «Вперёд» — лишняя работа. Обе панели живые
+              и читают одно состояние, поэтому расходиться им не с чего. */}
+          {pager("top")}
           <VideoTable rows={table.rows} sort={sort} onSort={handleSort} />
-          <TablePager
-            spec={pageSpec}
-            pageCount={table.pageCount}
-            total={table.total}
-            onPage={handlePage}
-            onPageSize={handlePageSize}
-            action={
-              runId === null ? null : <ExportButton runId={runId} sort={sort} total={table.total} />
-            }
-          />
+          {pager("bottom")}
         </>
       )}
     </>

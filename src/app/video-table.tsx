@@ -150,7 +150,7 @@ export function VideoTable({ rows, sort, onSort }: VideoTableProps) {
   }
 
   return (
-    <div className="mt-6">
+    <div className="mt-3">
       {/* Верхняя полоса прокрутки: пустая, но шириной с таблицу. */}
       <div ref={topRef} aria-hidden="true" className="overflow-x-auto overflow-y-hidden">
         <div ref={spacerRef} className="h-3" />
