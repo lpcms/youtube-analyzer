@@ -1,5 +1,6 @@
 import type { VideoPage } from "@/lib/fetch-channel";
 import type { JobProgress } from "@/lib/job-status";
+import type { ServiceHealth } from "@/lib/service-health";
 import type { FieldErrors } from "@/lib/request-schema";
 
 /**
@@ -21,6 +22,11 @@ export const emptyFormState: FormState = { errors: {}, error: null, runId: null 
 export interface PollResult {
   readonly progress: JobProgress | null;
   readonly page: VideoPage;
+  /**
+   * Состояние сервиса на момент ответа. Приезжает вместе с прогрессом,
+   * чтобы строка состояния не устаревала до перезагрузки страницы.
+   */
+  readonly health: ServiceHealth;
 }
 
 /** Значения формы при первой загрузке: обе галочки включены — это из ТЗ. */

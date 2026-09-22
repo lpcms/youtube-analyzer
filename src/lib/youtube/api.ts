@@ -31,7 +31,9 @@ export type YouTubeEndpoint = keyof typeof QUOTA_COST;
 export type YouTubeErrorKind =
   /** Суточная квота исчерпана — штатная ситуация, не поломка. */
   | "quota-exceeded"
-  /** Ключ отсутствует, неверен или ему запрещён доступ. */
+  /** Переменная окружения не задана: чинится настройкой, а не ожиданием. */
+  | "missing-key"
+  /** Ключ задан, но API его не принял: неверен или ему запрещён доступ. */
   | "bad-key"
   /** Сеть не ответила или ответ не разобрался. */
   | "network"
@@ -44,9 +46,28 @@ export class YouTubeApiError extends Error {
     message: string,
     readonly status?: number,
   ) {
-    super(message);
+    // Ключ вычищается на входе, а не на выходе: сообщение уходит и в лог,
+    // и на экран, и забыть про него можно ровно один раз.
+    super(scrubKey(message));
     this.name = "YouTubeApiError";
   }
+}
+
+/**
+ * Убирает ключ API из текста.
+ *
+ * Сообщение об ошибке показывается пользователю и попадает в лог, а ключ
+ * живёт в строке запроса — низовая ошибка сети вполне может притащить с собой
+ * весь адрес. Вычищается и пара `key=…`, и само значение ключа: оно могло
+ * попасть в текст и отдельно.
+ */
+export function scrubKey(text: string): string {
+  const masked = text.replace(/([?&]key=)[^&\s"']+/gi, "$1…");
+
+  const key = process.env["YOUTUBE_API_KEY"];
+  if (key === undefined || key === "") return masked;
+
+  return masked.split(key).join("…");
 }
 
 /** Суммарный расход квоты за процесс — в лог, чтобы дорогие вызовы были видны. */
@@ -63,7 +84,7 @@ export function resetQuotaCounter(): void {
 function apiKey(): string {
   const key = process.env["YOUTUBE_API_KEY"];
   if (key === undefined || key === "") {
-    throw new YouTubeApiError("bad-key", "Не задана переменная окружения YOUTUBE_API_KEY");
+    throw new YouTubeApiError("missing-key", "Не задана переменная окружения YOUTUBE_API_KEY");
   }
   return key;
 }
@@ -86,28 +107,35 @@ function classify(status: number, body: ApiErrorBody): YouTubeApiError {
 }
 
 /**
- * Вызывает метод API и учитывает потраченную квоту.
+ * Сколько раз пытаться, когда не ответила сеть.
  *
- * Расход печатается в лог: `search.list` стоит 100 единиц против 1 у остальных,
- * и без этого дорогой фоллбэк уходил бы незаметно.
+ * Попытки ограничены и невелики: выгрузка идёт при пользователе, и лучше
+ * закончить её частичным результатом, чем молотить в недоступную сеть,
+ * пока он смотрит на счётчик. Собранное к этому моменту уже в базе.
  */
-export async function callYouTube<T>(
-  endpoint: YouTubeEndpoint,
-  params: Record<string, string>,
-): Promise<T> {
-  const cost = QUOTA_COST[endpoint];
-  const query = new URLSearchParams({ ...params, key: apiKey() });
-  const method = endpoint.replace(".list", "");
+export const NETWORK_ATTEMPTS = 3;
 
-  spentQuota += cost;
-  console.info(
-    `[youtube] ${endpoint} — ${cost} ед. квоты (всего за процесс: ${spentQuota})` +
-      (cost >= 100 ? " ← дорогой вызов" : ""),
-  );
+/** Пауза перед повтором, растущая с номером попытки: 300 мс, затем 600 мс. */
+export const RETRY_DELAY_MS = 300;
 
+/**
+ * Стоит ли повторять.
+ *
+ * Только то, что может пройти со второго раза: молчащая сеть и сбой на стороне
+ * Google. Исчерпанную квоту и непринятый ключ повторять бессмысленно — ответ
+ * не изменится, а время и попытки потратятся.
+ */
+export function isRetryable(error: YouTubeApiError): boolean {
+  if (error.kind === "network") return true;
+  return error.kind === "api" && error.status !== undefined && error.status >= 500;
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function requestOnce<T>(url: string): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}/${method}?${query.toString()}`);
+    response = await fetch(url);
   } catch (cause) {
     throw new YouTubeApiError("network", "YouTube API недоступен: " + String(cause));
   }
@@ -124,4 +152,47 @@ export async function callYouTube<T>(
   }
 
   return body as T;
+}
+
+/**
+ * Вызывает метод API и учитывает потраченную квоту.
+ *
+ * Расход печатается в лог: `search.list` стоит 100 единиц против 1 у остальных,
+ * и без этого дорогой фоллбэк уходил бы незаметно.
+ *
+ * Квота считается один раз на вызов, а не на попытку: запрос, не дошедший
+ * до Google, у него ничего не списывает.
+ */
+export async function callYouTube<T>(
+  endpoint: YouTubeEndpoint,
+  params: Record<string, string>,
+): Promise<T> {
+  const cost = QUOTA_COST[endpoint];
+  const query = new URLSearchParams({ ...params, key: apiKey() });
+  const method = endpoint.replace(".list", "");
+  const url = `${API_BASE}/${method}?${query.toString()}`;
+
+  spentQuota += cost;
+  console.info(
+    `[youtube] ${endpoint} — ${cost} ед. квоты (всего за процесс: ${spentQuota})` +
+      (cost >= 100 ? " ← дорогой вызов" : ""),
+  );
+
+  let last: YouTubeApiError | null = null;
+
+  for (let attempt = 1; attempt <= NETWORK_ATTEMPTS; attempt += 1) {
+    try {
+      return await requestOnce<T>(url);
+    } catch (e) {
+      if (!(e instanceof YouTubeApiError) || !isRetryable(e)) throw e;
+
+      last = e;
+      if (attempt < NETWORK_ATTEMPTS) {
+        console.info(`[youtube] ${endpoint} — попытка ${attempt} не удалась, повторяю`);
+        await sleep(RETRY_DELAY_MS * attempt);
+      }
+    }
+  }
+
+  throw last ?? new YouTubeApiError("network", "YouTube API недоступен");
 }

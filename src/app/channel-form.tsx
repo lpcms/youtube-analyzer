@@ -9,6 +9,8 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { failureMessage } from "@/lib/failure-message";
+import type { ServiceHealth } from "@/lib/service-health";
 import type { VideoPage } from "@/lib/fetch-channel";
 import { isRunning, type JobProgress } from "@/lib/job-status";
 import { FIRST_PAGE, pageAfterResize, type PageSize, type PageSpec } from "@/lib/pagination";
@@ -16,6 +18,7 @@ import { DEFAULT_SORT, nextSort, type SortColumn, type SortSpec } from "@/lib/so
 import { fetchPage, pollFetch, startFetch } from "./actions";
 import { ExportButton } from "./export-button";
 import { FetchProgress } from "./fetch-progress";
+import { ServiceBanner } from "./service-banner";
 import { DEFAULTS, ERROR_ID, POLL_INTERVAL_MS, emptyFormState, type FormState } from "./form-state";
 import { TablePager, type PagerPlace } from "./table-pager";
 import { VideoTable } from "./video-table";
@@ -55,7 +58,12 @@ function rememberRunId(runId: string | null): void {
   window.history.replaceState(null, "", url.toString());
 }
 
-export function ChannelForm() {
+export interface ChannelFormProps {
+  /** Состояние сервиса на момент открытия страницы — дальше его обновляет опрос. */
+  readonly health: ServiceHealth;
+}
+
+export function ChannelForm({ health: initialHealth }: ChannelFormProps) {
   const [state, action, submitting] = useActionState<FormState, FormData>(
     startFetch,
     emptyFormState,
@@ -66,6 +74,10 @@ export function ChannelForm() {
   const [lost, setLost] = useState(false);
   const [sort, setSort] = useState<SortSpec>(DEFAULT_SORT);
   const [pageSpec, setPageSpec] = useState<PageSpec>(FIRST_PAGE);
+
+  // Состояние сервиса приходит с сервера при открытии страницы, а дальше
+  // приезжает с каждым ответом на опрос: иначе строка врала бы до перезагрузки.
+  const [health, setHealth] = useState<ServiceHealth>(initialHealth);
 
   // Задание берётся из ответа действия, а после перезагрузки — из адреса.
   // Это вычисляемое значение, а не состояние: дублировать его в useState
@@ -106,6 +118,8 @@ export function ChannelForm() {
         pageSpec.pageSize,
       );
       if (cancelled) return;
+
+      setHealth(result.health);
 
       if (result.progress === null) {
         // Задания нет: адрес из прошлого запуска с другой базой.
@@ -200,6 +214,8 @@ export function ChannelForm() {
 
   return (
     <>
+      <ServiceBanner health={health} />
+
       <form
         action={action}
         // noValidate: браузер со своей проверкой type=number блокирует
@@ -336,9 +352,11 @@ export function ChannelForm() {
         </p>
       )}
 
+      {/* Причина по-человечески, а не кодом: «quota-exceeded» пользователю
+          ничего не говорит и выглядит протёкшей наружу внутренностью. */}
       {finished && progress.errorReason !== null && (
         <p role="alert" className="mt-1 text-sm text-red-600">
-          Причина остановки: {progress.errorReason}
+          Причина остановки: {failureMessage(progress.errorReason)}
         </p>
       )}
 
