@@ -28,7 +28,7 @@ test.describe("ход выгрузки", () => {
     // Пока задание идёт, повторное нажатие невозможно.
     await expect(page.getByRole("button", { name: "Выгружаю…" })).toBeDisabled();
 
-    await expect(progress).toHaveText(`Готово: ${TOTAL}`, { timeout: 60_000 });
+    await expect(progress).toHaveText(`Готово: ${TOTAL} видео`, { timeout: 60_000 });
     // Таблица показывает первую страницу, всего строк — в подписи под ней.
     await expect(page.locator("tbody tr")).toHaveCount(50);
     await expect(start).toBeEnabled();
@@ -77,7 +77,7 @@ test.describe("ход выгрузки", () => {
     expect(page.url()).toBe(urlWithRun);
     const progress = page.locator("#fetch-progress");
     await expect(progress).toBeVisible({ timeout: 30_000 });
-    await expect(progress).toHaveText(`Готово: ${TOTAL}`, { timeout: 60_000 });
+    await expect(progress).toHaveText(`Готово: ${TOTAL} видео`, { timeout: 60_000 });
     await expect(page.locator("tbody tr")).toHaveCount(50);
   });
 

@@ -46,7 +46,7 @@ test.describe("исчерпанная квота", () => {
 
     // Первая страница успела сохраниться до отказа — её и показываем.
     await expect(page.locator("tbody tr")).toHaveCount(50, { timeout: 60_000 });
-    await expect(page.locator("#fetch-progress")).toContainText("Собрано 50");
+    await expect(page.locator("#fetch-progress")).toContainText("Собрано 50 видео");
 
     const reason = page.getByText(/Причина остановки/);
     await expect(reason).toContainText("квота");

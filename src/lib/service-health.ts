@@ -16,6 +16,7 @@
  */
 
 import { failureMessage } from "@/lib/failure-message";
+import { formatCount } from "@/lib/format";
 import type { FetchStatus } from "@/lib/job-status";
 
 /** Суточная квота YouTube Data API. */
@@ -76,9 +77,16 @@ export function healthMessage(health: ServiceHealth): string {
   return "Последняя выгрузка остановилась: " + failureMessage(reason).toLowerCase();
 }
 
-/** Подпись о расходе квоты. */
+/**
+ * Подпись о расходе квоты.
+ *
+ * Единица измерения названа прямо: «0 из 10 000» без неё читается как штуки
+ * видео или запросы, а это условные единицы YouTube — у разных вызовов
+ * разная цена. Разряды разделены, иначе «10000» считывается не с первого
+ * взгляда.
+ */
 export function quotaMessage(health: ServiceHealth): string {
-  return `Квота: ${health.quotaSpent} из ${QUOTA_LIMIT}`;
+  return `Квота: ${formatCount(health.quotaSpent)} из ${formatCount(QUOTA_LIMIT)} единиц`;
 }
 
 /**

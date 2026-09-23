@@ -28,14 +28,14 @@ test.describe("повторное «Начать»", () => {
 
     await fetchChannel(page, GEN1, BEFORE);
     await expect(page.locator("#row-count-top")).toHaveText(new RegExp(`из\\s*${BEFORE}`));
-    await expect(page.locator("#fetch-progress")).toHaveText(`Готово: ${BEFORE}`);
+    await expect(page.locator("#fetch-progress")).toHaveText(`Готово: ${BEFORE} видео`);
 
     // Тот же канал, но два ролика с него пропали, а один добавился.
     await fetchChannel(page, GEN2, AFTER);
 
     await expect(page.locator("#row-count-top")).toHaveText(new RegExp(`из\\s*${AFTER}`));
     await expect(page.locator("#fetch-progress")).toHaveText(
-      `Готово: ${AFTER}. Исчезло с канала: ${VANISHED}`,
+      `Готово: ${AFTER} видео. Исчезло с канала: ${VANISHED}`,
     );
   });
 
@@ -69,7 +69,7 @@ test.describe("повторное «Начать»", () => {
     await fetchChannel(page, GEN1, BEFORE);
 
     // Ни слова о пропажах: их и не было.
-    await expect(page.locator("#fetch-progress")).toHaveText(`Готово: ${BEFORE}`);
+    await expect(page.locator("#fetch-progress")).toHaveText(`Готово: ${BEFORE} видео`);
     await expect(page.locator("#row-count-top")).toHaveText(new RegExp(`из\\s*${BEFORE}`));
   });
 
@@ -85,11 +85,11 @@ test.describe("повторное «Начать»", () => {
     await page.getByLabel("Количество").fill("3");
     await fetchChannel(page, GEN1, 3);
 
-    await expect(page.locator("#fetch-progress")).toHaveText("Готово: 3");
+    await expect(page.locator("#fetch-progress")).toHaveText("Готово: 3 видео");
 
     // И следующая полная выгрузка снова показывает все десять.
     await page.getByRole("checkbox", { name: "Все видео" }).check();
     await fetchChannel(page, GEN1, BEFORE);
-    await expect(page.locator("#fetch-progress")).toHaveText(`Готово: ${BEFORE}`);
+    await expect(page.locator("#fetch-progress")).toHaveText(`Готово: ${BEFORE} видео`);
   });
 });

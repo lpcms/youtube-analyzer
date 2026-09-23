@@ -91,11 +91,14 @@ export function progressLabel(progress: JobProgress): string {
       : `Получено ${processed} из ~${expected} видео`;
   }
   if (status === "FAILED") return "Выгрузка не удалась";
-  if (status === "PARTIAL") return `Собрано ${processed}, выгрузка прервана`;
+  if (status === "PARTIAL") return `Собрано ${processed} видео, выгрузка прервана`;
 
   // «Исчезло», а не «исчезли»: безличная форма верна и для одного видео,
   // и для пяти, а счёт после двоеточия читается сразу.
+  //
+  // Единица названа у каждого числа, а не только у первого: «Готово: 137»
+  // одинаково читается и как видео, и как секунды, и как проценты.
   return progress.vanished > 0
-    ? `Готово: ${processed}. Исчезло с канала: ${progress.vanished}`
-    : `Готово: ${processed}`;
+    ? `Готово: ${processed} видео. Исчезло с канала: ${progress.vanished}`
+    : `Готово: ${processed} видео`;
 }

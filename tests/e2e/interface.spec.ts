@@ -49,14 +49,20 @@ test.describe("строка состояния сервиса", () => {
     // Внутри формы, а не отдельной полосой над ней.
     await expect(page.locator("form #service-status")).toHaveCount(1);
 
-    // И правее галочки Shorts, а не где-то выше по странице.
-    const shorts = await page.getByRole("checkbox", { name: "Shorts" }).boundingBox();
-    const box = await status.boundingBox();
-    expect(shorts).not.toBeNull();
-    expect(box).not.toBeNull();
-    expect(box?.x ?? 0).toBeGreaterThan(shorts?.x ?? 0);
-    // На одной строке: разница по вертикали меньше высоты самой строки.
-    expect(Math.abs((box?.y ?? 0) - (shorts?.y ?? 0))).toBeLessThan(40);
+    // И после галочки Shorts, а не где-то выше по странице.
+    //
+    // Проверяется порядок в разметке, а не координаты: строка управления
+    // переносится на узком экране, и на 1280 плашка уезжает под галочки.
+    // Это нормально — «после Shorts» про порядок, а не про пиксели.
+    const order = await page.evaluate(() => {
+      const shorts = document.querySelector('input[name="includeShorts"]');
+      const plate = document.querySelector("#service-status");
+      if (shorts === null || plate === null) return null;
+      // DOCUMENT_POSITION_FOLLOWING: плашка идёт после галочки.
+      return (shorts.compareDocumentPosition(plate) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    });
+
+    expect(order).toBe(true);
   });
 });
 
@@ -99,5 +105,72 @@ test.describe("вид таблицы", () => {
     const width = await views.evaluate((el) => getComputedStyle(el).borderRightWidth);
     expect(parseFloat(width)).toBeGreaterThan(0);
     expect(parseFloat(width)).toBeLessThanOrEqual(2);
+  });
+});
+
+test.describe("компактность формы", () => {
+  test("подпись поля ушла в плейсхолдер, но осталась для скринридера", async ({ page }) => {
+    await page.goto("/");
+
+    const field = page.getByLabel("Адрес канала");
+    await expect(field).toBeVisible();
+    await expect(field).toHaveAttribute("placeholder", /^Адрес канала: /);
+
+    // На экране подписи нет — она только для скринридера.
+    await expect(page.locator("label[for='channelUrl']")).toHaveClass(/sr-only/);
+  });
+
+  test("поиск, «Начать» и настройки стоят одной строкой", async ({ page }) => {
+    await page.goto("/");
+
+    const field = await page.getByLabel("Адрес канала").boundingBox();
+    const count = await page.getByLabel("Количество").boundingBox();
+
+    // Раньше поле занимало отдельную строку сверху: теперь они на одной,
+    // и до таблицы не надо прокручивать лишний экран.
+    expect(Math.abs((field?.y ?? 0) - (count?.y ?? 0))).toBeLessThan(40);
+  });
+
+  test("волчок крутится во время выгрузки и уходит по её окончании", async ({ page }) => {
+    await page.goto("/");
+    await page.getByLabel("Адрес канала").fill("https://www.youtube.com/@e2e");
+    await page.getByRole("button", { name: "Начать" }).click();
+
+    const spinner = page.locator("#fetch-progress svg");
+    await expect(spinner).toBeVisible();
+    // Кнопка недоступна ровно пока волчок крутится.
+    await expect(page.getByRole("button", { name: "Выгружаю…" })).toBeDisabled();
+
+    await expect(page.locator("tbody tr")).toHaveCount(PAGE_SIZE, { timeout: 60_000 });
+
+    await expect(spinner).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Начать" })).toBeEnabled();
+    // Счёт назван с единицей: «Готово: 137» читалось бы как что угодно.
+    await expect(page.locator("#fetch-progress")).toHaveText("Готово: 137 видео");
+  });
+
+  test("расход квоты назван с единицей измерения", async ({ page }) => {
+    await page.goto("/");
+
+    await expect(page.locator("#quota-spent")).toHaveText(/из\s*10 000 единиц/);
+  });
+});
+
+test.describe("шапка таблицы", () => {
+  test("сведения о канале слева, листание справа, одной строкой", async ({ page }) => {
+    await page.goto("/");
+    await page.getByLabel("Адрес канала").fill("https://www.youtube.com/@e2e");
+    await page.getByRole("button", { name: "Начать" }).click();
+    await expect(page.locator("tbody tr")).toHaveCount(PAGE_SIZE, { timeout: 60_000 });
+
+    const note = await page.locator("#snapshot-note").boundingBox();
+    const pager = await page.locator("[data-place='top']").boundingBox();
+
+    expect(note).not.toBeNull();
+    expect(pager).not.toBeNull();
+    // Одна строка: раньше это были две.
+    expect(Math.abs((note?.y ?? 0) - (pager?.y ?? 0))).toBeLessThan(40);
+    // Листание правее сведений о канале.
+    expect(pager?.x ?? 0).toBeGreaterThan(note?.x ?? 0);
   });
 });

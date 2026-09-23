@@ -303,44 +303,43 @@ export function ChannelForm({
         noValidate
         className="flex flex-col gap-4"
       >
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <div className="flex-1">
-            <label htmlFor="channelUrl" className="mb-1 block text-sm font-medium">
-              Адрес канала
-            </label>
-            <input
-              id="channelUrl"
-              name="channelUrl"
-              type="text"
-              placeholder="https://www.youtube.com/@channel"
-              // Сообщение об ошибке связано с полем программно, иначе скринридер
-              // прочитает поле без причины отказа.
-              aria-describedby={urlError === undefined ? undefined : ERROR_ID.channelUrl}
-              aria-invalid={urlError !== undefined}
-              className="w-full rounded border border-black/20 px-3 py-2 dark:border-white/25"
-            />
-          </div>
+        {/* Всё управление — одной строкой: поиск, «Начать», количество, типы
+            и обе плашки. Раньше поле с подписью занимало отдельную строку
+            сверху, и до таблицы приходилось прокручивать лишний экран. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3 text-sm">
+          {/* Подпись убрана с экрана, но не из разметки: скринридеру нужно имя
+              поля, а плейсхолдер именем не является — он исчезает при вводе
+              и не читается как подпись. Поэтому то же слово стоит в начале
+              плейсхолдера, а сама подпись живёт для скринридера. */}
+          <label htmlFor="channelUrl" className="sr-only">
+            Адрес канала
+          </label>
+          <input
+            id="channelUrl"
+            name="channelUrl"
+            type="text"
+            placeholder="Адрес канала: https://www.youtube.com/@channel"
+            // Сообщение об ошибке связано с полем программно, иначе скринридер
+            // прочитает поле без причины отказа.
+            aria-describedby={urlError === undefined ? undefined : ERROR_ID.channelUrl}
+            aria-invalid={urlError !== undefined}
+            className="min-w-0 grow basis-80 rounded border border-black/20 px-3 py-1.5 dark:border-white/25"
+          />
 
           <button
             type="submit"
             disabled={working || noTypeChosen}
             aria-describedby={noTypeChosen ? ERROR_ID.types : undefined}
-            className="rounded bg-red-600 px-5 py-2 font-medium text-white disabled:opacity-60"
+            className="rounded bg-red-600 px-5 py-1.5 font-medium text-white disabled:opacity-60"
           >
             {working ? "Выгружаю…" : "Начать"}
           </button>
-        </div>
 
-        {/* Сообщение стоит под строкой, а не внутри неё: внутри оно растило
-            блок с полем и сдвигало кнопку «Начать» вниз, стоило ошибке
-            появиться. Связь с полем держится на id, а не на вложенности. */}
-        {urlError !== undefined && (
-          <p id={ERROR_ID.channelUrl} role="alert" className="-mt-2 text-sm text-red-600">
-            {urlError}
-          </p>
-        )}
+          {/* Счётчик сразу за кнопкой, которой его запустили: пока выгрузка
+              идёт, кнопка недоступна, и объяснение этому должно быть рядом
+              с ней, а не на другом конце строки. */}
+          {progress !== null && <FetchProgress progress={progress} />}
 
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
           <div className="flex items-center gap-2">
             <label htmlFor="count" className="font-medium">
               Количество
@@ -396,15 +395,16 @@ export function ChannelForm({
               нажать «Начать», а отдельной полосой над формой оно занимало
               целую строку экрана. */}
           <ServiceBanner health={health} />
-
-          {/* Счётчик стоит здесь, а не под формой: это главное, за чем
-              следят во время выгрузки, и глазу незачем прыгать вниз. */}
-          {progress !== null && (
-            <div className="ml-auto">
-              <FetchProgress progress={progress} />
-            </div>
-          )}
         </div>
+
+        {/* Сообщения стоят под строкой, а не внутри неё: внутри они растили бы
+            блок с полем и сдвигали кнопку «Начать», стоило ошибке появиться.
+            Связь с полем держится на id, а не на вложенности. */}
+        {urlError !== undefined && (
+          <p id={ERROR_ID.channelUrl} role="alert" className="text-sm text-red-600">
+            {urlError}
+          </p>
+        )}
 
         {countError !== undefined && (
           <p id={ERROR_ID.count} role="alert" className="text-sm text-red-600">
@@ -449,12 +449,20 @@ export function ChannelForm({
               строками длиннее экрана, и после просмотра низа возвращаться
               наверх за кнопкой «Вперёд» — лишняя работа. Обе панели живые
               и читают одно состояние, поэтому расходиться им не с чего. */}
-          {/* Таблица из истории ничем не отличается на вид от только что
-              выгруженной — дата снимка снимает этот вопрос. */}
-          <p id="snapshot-note" className="mt-6 text-sm opacity-70">
-            {snapshotNote(progress.channelTitle, progress.fetchedAt)}
-          </p>
-          {pager("top")}
+          {/* Над таблицей две вещи, и обе нужны разом: слева чей это снимок
+              и когда снят, справа — листание. В столбик они занимали две
+              строки экрана, хотя вместе укладываются в одну. */}
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            {/* Таблица из истории ничем не отличается на вид от только что
+                выгруженной — дата снимка снимает этот вопрос. */}
+            <p
+              id="snapshot-note"
+              className="rounded-lg border border-black/10 bg-black/[0.03] px-3 py-1.5 text-sm dark:border-white/15 dark:bg-white/[0.05]"
+            >
+              {snapshotNote(progress.channelTitle, progress.fetchedAt)}
+            </p>
+            {pager("top")}
+          </div>
           <VideoTable rows={table.rows} sort={sort} onSort={handleSort} />
           {pager("bottom")}
 

@@ -95,23 +95,25 @@ describe("текст прогресса", () => {
       progressLabel(
         progress({ status: "PARTIAL", processed: 40, expected: 200, errorReason: "quota" }),
       ),
-    ).toBe("Собрано 40, выгрузка прервана");
+    ).toBe("Собрано 40 видео, выгрузка прервана");
   });
 
   it("готовая выгрузка без пропаж не говорит о них", () => {
-    expect(progressLabel(progress({ status: "SUCCEEDED", processed: 137 }))).toBe("Готово: 137");
+    expect(progressLabel(progress({ status: "SUCCEEDED", processed: 137 }))).toBe(
+      "Готово: 137 видео",
+    );
   });
 
   it("исчезнувшие с канала названы отдельно", () => {
     expect(progressLabel(progress({ status: "SUCCEEDED", processed: 135, vanished: 2 }))).toBe(
-      "Готово: 135. Исчезло с канала: 2",
+      "Готово: 135 видео. Исчезло с канала: 2",
     );
   });
 
   it("одно исчезнувшее видео не ломает согласование", () => {
     // «Исчезло» безлично: верно и для одного, и для пяти.
     expect(progressLabel(progress({ status: "SUCCEEDED", processed: 1, vanished: 1 }))).toBe(
-      "Готово: 1. Исчезло с канала: 1",
+      "Готово: 1 видео. Исчезло с канала: 1",
     );
   });
 });

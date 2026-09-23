@@ -72,8 +72,12 @@ export function TablePager({
   return (
     <div
       data-place={place}
-      className={`flex flex-wrap items-center gap-x-6 gap-y-3 text-sm ${
-        place === "top" ? "mt-3" : "mt-4"
+      // Плашка, как и у сведений о канале рядом: две разные вещи в одной
+      // строке легче различить, когда у каждой своя рамка.
+      // Верхняя без собственного отступа — её задаёт строка, в которой
+      // она стоит вместе со сведениями о канале.
+      className={`flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-black/10 px-3 py-1.5 text-sm dark:border-white/15 ${
+        place === "top" ? "" : "mt-4"
       }`}
     >
       <p id={rowCountId} className="tabular-nums opacity-80">
@@ -122,7 +126,10 @@ export function TablePager({
 
       {showSize && (
         <div className="flex items-center gap-2">
-          <label htmlFor={sizeId}>Строк на странице</label>
+          {/* «На странице», а не «Строк на странице»: рядом уже стоит счёт
+              строк, и слово не повторяется. Заодно строка над таблицей
+              укладывается в один ряд со сведениями о канале. */}
+          <label htmlFor={sizeId}>На странице</label>
           <select
             id={sizeId}
             value={spec.pageSize}

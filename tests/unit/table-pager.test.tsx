@@ -109,7 +109,7 @@ describe("размер страницы", () => {
     const user = userEvent.setup();
     const { onPageSize } = pager({ page: 1, pageSize: 50 }, 3, 137);
 
-    await user.selectOptions(screen.getByLabelText("Строк на странице"), "25");
+    await user.selectOptions(screen.getByLabelText("На странице"), "25");
 
     expect(onPageSize).toHaveBeenCalledWith(25);
   });
@@ -117,13 +117,13 @@ describe("размер страницы", () => {
   it("текущий размер отмечен", () => {
     pager({ page: 1, pageSize: 100 }, 2, 137);
 
-    expect(screen.getByLabelText("Строк на странице")).toHaveValue("100");
+    expect(screen.getByLabelText("На странице")).toHaveValue("100");
   });
 
   it("выбор не предлагается, когда строк меньше самого мелкого размера", () => {
     pager({ page: 1, pageSize: 50 }, 1, 12);
 
-    expect(screen.queryByLabelText("Строк на странице")).toBeNull();
+    expect(screen.queryByLabelText("На странице")).toBeNull();
   });
 });
 
@@ -162,7 +162,7 @@ describe("две панели на странице", () => {
     const ids = screen.getAllByText(/Строки/).map((el) => el.id);
     expect(ids).toEqual(["row-count-top", "row-count-bottom"]);
 
-    const selects = screen.getAllByLabelText("Строк на странице").map((el) => el.id);
+    const selects = screen.getAllByLabelText("На странице").map((el) => el.id);
     expect(selects).toEqual(["pageSize-top", "pageSize-bottom"]);
     expect(new Set(selects).size).toBe(2);
   });

@@ -92,7 +92,10 @@ describe("насколько всё плохо", () => {
   });
 
   it("расход квоты назван с пределом", () => {
-    expect(quotaMessage(health({ quotaSpent: 137 }))).toBe(`Квота: 137 из ${QUOTA_LIMIT}`);
+    // Единица названа прямо: «137 из 10 000» без неё читается как штуки
+    // видео или запросы, а это условные единицы YouTube.
+    expect(quotaMessage(health({ quotaSpent: 137 }))).toBe("Квота: 137 из 10 000 единиц");
+    expect(QUOTA_LIMIT).toBe(10_000);
   });
 });
 
