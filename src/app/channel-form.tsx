@@ -107,6 +107,9 @@ export function ChannelForm({
    */
   const [runs, setRuns] = useState<readonly RunOption[]>([]);
 
+  /** Номер последнего запроса страницы: см. reload. */
+  const requestId = useRef(0);
+
   const reloadHistory = useCallback(() => {
     void listHistory().then(setChannels);
   }, []);
@@ -215,9 +218,19 @@ export function ChannelForm({
    * Порядок и страница задаются базе, а не наводятся по массиву в браузере:
    * на выгрузке в десятки тысяч строк это разница между отзывчивой таблицей
    * и зависшей.
+   *
+   * Ответы нумеруются, и отвечает только последний запрошенный. Два клика
+   * подряд — сортировка, а следом «Вперёд» — уходят двумя запросами, и порядок
+   * их возвращения ничем не гарантирован: без этого счётчика припозднившийся
+   * ответ на сортировку перетирал свежую вторую страницу первой, а панель
+   * листания при этом продолжала показывать вторую. Поймано в E2E.
    */
   function reload(nextSpec: PageSpec, nextSortSpec: SortSpec): void {
     if (runId === null) return;
+
+    const mine = requestId.current + 1;
+    requestId.current = mine;
+
     void fetchPage(
       runId,
       nextSortSpec.column,
@@ -225,6 +238,8 @@ export function ChannelForm({
       nextSpec.page,
       nextSpec.pageSize,
     ).then((page) => {
+      if (mine !== requestId.current) return;
+
       setTable(page);
       // База могла загнать номер страницы в границы — держим своё
       // представление в согласии с её ответом.

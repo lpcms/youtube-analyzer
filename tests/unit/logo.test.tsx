@@ -15,11 +15,28 @@ import { describe, expect, it } from "vitest";
 import { LOGO_BACKGROUND, LOGO_PATH, Logo } from "@/app/logo";
 
 const iconSvg = readFileSync(path.join(process.cwd(), "src/app/icon.svg"), "utf8");
+const assetSvg = readFileSync(path.join(process.cwd(), "docs/assets/logo.svg"), "utf8");
 
 describe("знак сервиса", () => {
   it("во вкладке браузера тот же рисунок, что и в шапке страницы", () => {
     expect(iconSvg).toContain(LOGO_PATH);
     expect(iconSvg).toContain(LOGO_BACKGROUND);
+  });
+
+  it("знак в документации тот же, что и в сервисе", () => {
+    // README и вкладка браузера — разные файлы по необходимости, но рисунок
+    // у них обязан быть один.
+    expect(assetSvg).toContain(LOGO_PATH);
+    expect(assetSvg).toContain(LOGO_BACKGROUND);
+  });
+
+  it("растровая копия для README существует и не пустая", () => {
+    // GitHub не везде показывает SVG, поэтому в шапке README лежит PNG.
+    const png = readFileSync(path.join(process.cwd(), "docs/assets/logo.png"));
+
+    expect(png.byteLength).toBeGreaterThan(1000);
+    // Сигнатура PNG: по ней файл опознаёт и браузер.
+    expect([...png.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
   });
 
   it("рисуется линиями, а не буквой из шрифта", () => {

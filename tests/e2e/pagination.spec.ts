@@ -96,8 +96,15 @@ test.describe("страницы таблицы", () => {
       "descending",
     );
 
+    const firstPage = await visibleLinks(page);
+
     await forward(page).click();
     await expect(page.getByRole("navigation", { name: TOP_NAV })).toHaveText(/Страница\s*2/);
+
+    // Ждём сами строки, а не номер страницы: и номер, и подпись «51–100»
+    // панель меняет сразу по клику, не дожидаясь ответа сервера, и тест
+    // успевал прочитать ещё первую страницу.
+    await expect.poll(async () => (await visibleLinks(page))[0]).not.toBe(firstPage[0]);
 
     // Порядок не сбросился на «свежие сверху».
     await expect(page.getByRole("columnheader", { name: /Просмотры/ })).toHaveAttribute(

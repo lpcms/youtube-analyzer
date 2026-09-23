@@ -15,6 +15,39 @@ const nextConfig: NextConfig = {
    * ни его, ни рабочую базу.
    */
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
+
+  /**
+   * Заголовки безопасности.
+   *
+   * Здесь только то, что не зависит от запроса. Content-Security-Policy
+   * живёт в `src/proxy.ts`: в нём nonce, а nonce обязан быть свой на каждый
+   * ответ, и из статического конфига такого не выдать.
+   *
+   * Сервис локальный и без авторизации, но заголовки всё равно нужны:
+   * описания видео приходят с YouTube, и это чужой текст на нашей странице.
+   */
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          // Браузер не должен угадывать тип по содержимому: подменённый
+          // тип — классический способ заставить его исполнить не то.
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          // Страницу нельзя положить в чужой фрейм. Дублирует frame-ancestors
+          // из CSP — для браузеров, которые знают только это.
+          { key: "X-Frame-Options", value: "DENY" },
+          // Адрес страницы наружу не уходит: в нём идентификатор выгрузки.
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // Ничего из этого сервису не нужно, и просить он не должен.
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

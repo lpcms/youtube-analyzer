@@ -60,7 +60,13 @@ export function ServiceBanner({ health }: { health: ServiceHealth }) {
       <span className="font-semibold">{look.word}.</span>
       <span>{healthMessage(health)}</span>
 
-      <span id="quota-spent" title={QUOTA_HINT} className="cursor-help tabular-nums opacity-70">
+      <span
+        id="quota-spent"
+        title={QUOTA_HINT}
+        // Не opacity-70: на светлой плашке «работает» она давала контраст 4,1
+        // при требуемых 4,5, и расход квоты читался плохо.
+        className="cursor-help tabular-nums opacity-90"
+      >
         {quotaMessage(health)}
       </span>
     </div>
