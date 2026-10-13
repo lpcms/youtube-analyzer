@@ -5,7 +5,7 @@
 ## Как продолжить
 
 ```
-cd D:\work\next.js\youtube_analyzer
+cd D:\work\next.js\youtube-analyzer.com
 claude
 ```
 
